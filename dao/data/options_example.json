@@ -93,6 +93,7 @@
     "prices consumption": "True",
     "prices production": "False",
     "prices spot": "True",
+    "price zero line": "False",
     "average consumption": "True"
   },
   "interval": "15min",
