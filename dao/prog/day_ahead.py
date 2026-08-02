@@ -5158,6 +5158,10 @@ class DaCalc(DaBase):
         bottom, top = axis22.get_ylim()
         if bottom > 0:
             axis22.set_ylim([0, top])
+        if _g and _g.price_zero_line:
+            axis22.axhline(
+                0.0, color="white", linewidth=0.8, linestyle="--", alpha=0.6
+            )
         lns = []
         if B > 0:
             lns += ln1

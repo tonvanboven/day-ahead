@@ -52,6 +52,15 @@ class GraphicsConfig(BaseModel):
             "x-ui-section": "Graphics",
         },
     )
+    price_zero_line: bool = Field(
+        alias="price zero line",
+        default=False,
+        description="Show a zero reference line on the price axis in graphs",
+        json_schema_extra={
+            "x-help": "Display a horizontal zero reference line on the price axis of the lower SoC/prices graph.",
+            "x-ui-section": "Graphics",
+        },
+    )
     average_consumption: bool = Field(
         alias="average consumption",
         default=True,
