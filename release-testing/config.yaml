@@ -1,5 +1,5 @@
 ---
-name: 刀 Day Ahead Optimizer (TESTING)
+name: 刀 Day Ahead Optimizer (TvB) (TESTING)
 version: 2026.7.0.rc2
 stage: experimental
 slug: day_ahead_opt-testing
