@@ -16,6 +16,19 @@ berekeningen en bewerkingen uit:
 Het programma draait alleen als addon op HA-installaties met een arm64 processor (bijv Raspberry Pi4) of 
 een intel 64 bit processor (amd64). Maar het kan ook separate Docker-container worden geinstalleerd
 
+## Deze fork
+Deze release van de Ton van Boven-fork is gebaseerd op de stabiele productieversie `2026.8.0` van de
+oorspronkelijke DAO-repository van Cees van Beek. Updates uit latere release candidates zijn niet opgenomen.
+
+Ten opzichte van die productieversie bevat deze fork de volgende eigen aanpassingen:
+
+* vooraf laden van batterij- en EV-regelingen voor het volgende interval, inclusief het optioneel herstellen van
+    het berekende grid-setpoint;
+* een optionele nulreferentielijn in prijsgrafieken;
+* configuratie en Docker-images voor de Ton van Boven-fork.
+
+De wijzigingen zijn bewust beperkt gehouden. De preload-functionaliteit is experimenteel en staat standaard uit.
+
 ---
 ## Documentatie 
 In de loop van 2025 is begonnen met het verhuizen en actualiseren van de documentie vanaf DOCS.md

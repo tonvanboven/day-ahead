@@ -408,7 +408,7 @@ Optimizer ensures combined consumption never exceeds this limit:
 | `max_power` | number | No | `17` | Maximum grid power in kW (Unit: `kW`) _Must be > 0, typical 7-25 kW for residential_ |
 | `entity balance switch` | [EntityId](#entityid) (optional) | No | `null` | HA entity for grid balancing switch |
 | `entity grid setpoint` | [EntityId](#entityid) (optional) | No | `null` | HA entity for the grid setpoint |
-| `preload next interval controls` | boolean | No | `true` | Restore cached battery and EV controls at the start of the next interval |
+| `preload next interval controls` | boolean | No | `false` | Restore cached battery and EV controls at the start of the next interval |
 
 <details>
 <summary><b>📖 Field Details</b> (click to expand)</summary>
@@ -427,7 +427,7 @@ Optional: Home Assistant entity to save the average calculated power on the grid
 
 **`preload next interval controls`**
 
-Optional: cache the calculated battery feed-in values and EV charging amperes for the next interval and restore them exactly when that next interval starts. Disable this if you do not want DAO to preload these controls before a new optimization run has finished.
+Optional: apply cached battery feed-in values and EV charging amperes for the exact start of the next interval before a new optimization finishes.
 
 </details>
 
@@ -1437,6 +1437,7 @@ Graphs can show:
 | `prices consumption` | boolean | No | `true` | Show consumption prices in graphs |
 | `prices production` | boolean | No | `false` | Show production prices in graphs |
 | `prices spot` | boolean | No | `true` | Show spot prices in graphs |
+| `price zero line` | boolean | No | `false` | Show a zero reference line on the price axis in graphs |
 | `average consumption` | boolean | No | `true` | Show average consumption in graphs |
 
 <details>
@@ -1461,6 +1462,10 @@ Display feed-in/production prices in graphs. Useful if you have solar feed-in to
 **`prices spot`**
 
 Display raw day-ahead spot market prices (before taxes/markup) in graphs. Shows pure market price variations.
+
+**`price zero line`**
+
+Display a horizontal zero reference line on the price axis of the lower SoC/prices graph.
 
 **`average consumption`**
 

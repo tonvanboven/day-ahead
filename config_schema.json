@@ -1297,6 +1297,14 @@
           "x-help": "Display raw day-ahead spot market prices (before taxes/markup) in graphs. Shows pure market price variations.",
           "x-ui-section": "Graphics"
         },
+        "price zero line": {
+          "default": false,
+          "description": "Show a zero reference line on the price axis in graphs",
+          "title": "Price Zero Line",
+          "type": "boolean",
+          "x-help": "Display a horizontal zero reference line on the price axis of the lower SoC/prices graph.",
+          "x-ui-section": "Graphics"
+        },
         "average consumption": {
           "default": true,
           "description": "Show average consumption in graphs",
@@ -1358,6 +1366,15 @@
           "x-help": "Optional: Home Assistant entity to save the average calculated power on the grid-point. Can be used for XOM-regulation.",
           "x-ui-section": "Power Configuration",
           "title": "Entity Grid Setpoint"
+        },
+        "preload next interval controls": {
+          "default": false,
+          "description": "Restore cached battery and EV controls at the start of the next interval",
+          "title": "Preload Next Interval Controls",
+          "type": "boolean",
+          "x-help": "Optional: apply cached battery feed-in values and EV charging amperes for the exact start of the next interval before a new optimization finishes.",
+          "x-ui-section": "Power Configuration",
+          "x-ui-widget-filter": "switch"
         }
       },
       "title": "GridConfig",
