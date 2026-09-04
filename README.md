@@ -18,7 +18,8 @@ een intel 64 bit processor (amd64). Maar het kan ook separate Docker-container w
 
 ## Deze fork
 Deze release van de Ton van Boven-fork is gebaseerd op de stabiele productieversie `2026.8.0` van de
-oorspronkelijke DAO-repository van Cees van Beek. Updates uit latere release candidates zijn niet opgenomen.
+oorspronkelijke [DAO-repository `corneel27/day-ahead`](https://github.com/corneel27/day-ahead). Updates uit latere
+release candidates zijn niet opgenomen.
 
 Ten opzichte van die productieversie bevat deze fork de volgende eigen aanpassingen:
 
