@@ -37,6 +37,9 @@ naar de wiki-pagina's op github: https://github.com/corneel27/day-ahead/wiki
 ---
 
 ## Installatie
+Voeg voor installatie via Home Assistant Apps deze repository toe:
+[Ton van Boven DAO-fork](https://github.com/tonvanboven/day-ahead)
+
 Deze is uitgebreid beschreven in de wiki: https://github.com/corneel27/day-ahead/wiki/2.-Installatie-en-basis-configuratie
 
 
