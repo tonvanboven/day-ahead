@@ -252,8 +252,6 @@ class DaCalc(DaBase):
         if _start_dt is not None or _start_soc is not None or _start_ev_soc is not None:
             self.debug = True
         logging.info(f"Debug = {self.debug}")
-        # Callable passed to FlexValue.resolve() — returns HA state as a plain string.
-        ha_getter = lambda eid: self.get_state(eid).state
         if _start_dt is None:
             start_dt = dt.datetime.now()
         else:
@@ -598,6 +596,7 @@ class DaCalc(DaBase):
         for s in range(solar_num):
             for u in range(U):
                 model += pv_ac[s][u] == solar_prod[s][u] * pv_ac_on_off[s][u]
+                model += pv_ac_on_off[s][u] + solar_prod[s][u] >= 1
         for s in range(solar_num):
             if entity_pv_ac_switch[s] is None:
                 for u in range(U):
@@ -697,13 +696,13 @@ class DaCalc(DaBase):
             max_dc_from_bat_power.append(
                 max_discharge_power[b] * 2
                 if _bat_to_dc_max is None
-                else _bat_to_dc_max.resolve(ha_getter) / 1000
+                else _bat_to_dc_max.resolve(self.ha_getter) / 1000
             )
             _dc_to_bat_max = self.battery_options[b].dc_to_bat_max_power
             max_dc_to_bat_power.append(
                 max_charge_power[b] * 2
                 if _dc_to_bat_max is None
-                else _dc_to_bat_max.resolve(ha_getter) / 1000
+                else _dc_to_bat_max.resolve(self.ha_getter) / 1000
             )
 
             # reduce power low soc
@@ -777,11 +776,11 @@ class DaCalc(DaBase):
             eff_bat_to_dc.append(float(self.battery_options[b].bat_to_dc_efficiency))
             # fractie van 1
 
-            lower_limit.append(self.battery_options[b].lower_limit.resolve(ha_getter))
-            upper_limit.append(self.battery_options[b].upper_limit.resolve(ha_getter))
+            lower_limit.append(self.battery_options[b].lower_limit.resolve(self.ha_getter))
+            upper_limit.append(self.battery_options[b].upper_limit.resolve(self.ha_getter))
             _opt_lvl_field = self.battery_options[b].optimal_lower_level
             opt_low_lvl = float(
-                _opt_lvl_field.resolve(ha_getter)
+                _opt_lvl_field.resolve(self.ha_getter)
                 if _opt_lvl_field is not None
                 else lower_limit[b]
             )
@@ -1006,7 +1005,9 @@ class DaCalc(DaBase):
         ]
         dc_to_ac = [
             [
-                model.add_var(var_type=CONTINUOUS, lb=0, ub=max(dc_to_ac_samples[b]) if dc_to_ac_samples[b] else 0)
+                model.add_var(var_type=CONTINUOUS,
+                              lb=0,
+                              ub=max(dc_to_ac_samples[b]) if dc_to_ac_samples[b] else 0)
                 for _ in range(U)
             ]
             for b in range(B)
@@ -1233,6 +1234,9 @@ class DaCalc(DaBase):
                     for s in range(pv_dc_num[b])
                 )
 
+                for s in range(pv_dc_num[b]):
+                    model += pv_dc_on_off[b][s][u] + pv_prod_dc[b][s][u] >= 1
+
                 model += (
                     dc_from_ac[b][u] + dc_from_bat[b][u] + pv_prod_dc_sum[b][u]
                     == dc_to_ac[b][u] + dc_to_bat[b][u]
@@ -1329,14 +1333,14 @@ class DaCalc(DaBase):
             logging.info(f"Boiler hysterese {boiler_hysterese} K")
 
             cooling_rate = self.boiler_options.cooling_rate.resolve(
-                ha_getter
+                self.ha_getter
             )  # FlexFloat
             logging.info(f"Boiler cooling rate {cooling_rate} K/uur")
             boiler_cooling = cooling_rate * self.interval_s / 3600
 
             # 45 °C grens daaronder kan worden verwarmd
             boiler_bovengrens = self.boiler_options.heating_allowed_below.resolve(
-                ha_getter
+                self.ha_getter
             )  # FlexFloat
             logging.info(f"Boiler heating allowed below {boiler_bovengrens} °C")
 
@@ -1357,7 +1361,7 @@ class DaCalc(DaBase):
             # spec heat in kJ/K = vol in liter * 4,2 kJ/k.liter + 100 kg boiler * 0,5 kJ/k.kg
             spec_heat_boiler = 1.1 * (vol * 4.2 + 100 * 0.5)  # kJ/K
             # cop flexfloat
-            cop_boiler = self.boiler_options.cop.resolve(ha_getter)
+            cop_boiler = self.boiler_options.cop.resolve(self.ha_getter)
             # kWh elektriciteit / K
             # spec_elec_boiler = spec_heat_boiler / 3600 * cop_boiler
             # elektrisch vermogen in W
@@ -1806,7 +1810,7 @@ class DaCalc(DaBase):
             except ValueError:
                 max_ampere = 10
             charge_three_phase = self.ev_options[e].charge_three_phase.resolve(
-                ha_getter
+                self.ha_getter
             )
             if charge_three_phase:
                 ampere_f = 3
@@ -1987,7 +1991,6 @@ class DaCalc(DaBase):
             for e in range(EV)
         ]  # load battery in kWh
 
-
         ev_soc_kwh = [
             [
                 model.add_var(var_type=CONTINUOUS, lb=0)
@@ -1995,7 +1998,6 @@ class DaCalc(DaBase):
             ]
             for e in range(EV)
         ]  # soc in kWh na ieder interval
-
 
         ev_is_on = [
             [model.add_var(var_type=BINARY) for _ in range(U)] for _ in range(EV)
@@ -2025,10 +2027,10 @@ class DaCalc(DaBase):
             model.add_var(var_type=INTEGER, lb=0) for e in range(EV)
         ]  # sum of ev starts
 
-        ev_delta_soc =[
+        ev_delta_soc = [
             [model.add_var(var_type=CONTINUOUS, lb=0) for _ in range(U)]
             for _ in range(EV)
-        ] # delta soc in kWh between wished and actual
+        ]  # delta soc in kWh between wished and actual
 
         low_soc_penalty_int = [
             [model.add_var(var_type=CONTINUOUS, lb=0) for _ in range(U)]
@@ -2132,7 +2134,6 @@ class DaCalc(DaBase):
                         * stage_factor[e][cs][u]
                         for cs in range(ECS[e])
                     )
-
 
                     if u == 0:
                         model += (
@@ -2248,12 +2249,19 @@ class DaCalc(DaBase):
                 """
             else:
                 model += xsum(c_ev[e][u] for u in range(U)) == 0
+                for cs in range(ECS[e]):
+                    for u in range(U):
+                        model += stage_on[e][cs][u] == 0
                 for u in range(U):
                     model += c_ev[e][u] == 0
                     model += p_ev[e][u] == 0
                     model += ev_accu_in[e][u] == 0
                     model += ev_is_partial[e][u] == 0
                     model += ev_boundary_stop[e][u] == 0
+                    model += ev_is_off[e][u] == 1
+                    model += ev_is_on[e][u] == 0
+                model += ev_boundary_sum[e]== 0
+                model += ev_partial_sum[e] == 0
                 model += ev_start_stops_sum[e] == 0
 
         ##################################################################
@@ -2339,7 +2347,7 @@ class DaCalc(DaBase):
 
             # degree days factor kWh th / K.day
             degree_days_factor = self.heating_options.degree_days_factor.resolve(
-                ha_getter
+                self.ha_getter
             )
             if degree_days_factor < 0.1:
                 logging.warning(
@@ -3394,7 +3402,7 @@ class DaCalc(DaBase):
         #        strategy optimization
         #####################################################
         # settings
-        max_gap = abs(self.config.max_gap.resolve(ha_getter))
+        max_gap = abs(self.config.max_gap.resolve(self.ha_getter))
         max_gap = max(0.00001, min(max_gap, 1.0))  # clamp to [0.00001, 1.0]
 
         model.max_mip_gap_abs = max_gap
