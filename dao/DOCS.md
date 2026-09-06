@@ -549,7 +549,7 @@ Alle instellingen die beginnen met "!secret" komen in het bestand `secrets.json`
 Deze bestanden staan lokaal in de map `\config`, maar zijn extern benaderbaar met Samba.<br>
 Er zijn twee manieren om bestanden aan te passen:
 * als je de HA-add-on Samba hebt geinstalleerd, krijg je met je bestandenbladeraar (bij Windows is dat de Explorer, bij Mac Finder) 
-toegang o.a. tot de folder `/add-on_configs/xxx_day_ahead_opt` van je Home Assistant machine. 
+toegang o.a. tot de folder `/add-on_configs/xxx_day_ahead_opt_tvb` van je Home Assistant machine.
 In de submap `dao_data` staan de genoemde configuratie bestanden. Je kunt dan met je eigen teksteditor (bijv notepad) de bestanden aanpassen.<br>
  Let op gebruik geen Word of iets dergelijks, want die plaatsen opmaak codes in de tekst.<br>
 * via het dashboard van de add-on (als deze kan opstarten) kun je via de menu-opties `\Config\options` en `\Config\secrets`
@@ -2024,7 +2024,7 @@ https://github.com/home-assistant/add-ons/tree/master/ssh
     * daarna moet je alsnig het opgegeven wachtwoord invoeren
  * je krijgt dan in beide gevallen de shell-prompt van de ha-supervisor
  * je krijgt vandaaruit toegang tot day-ahead add-on met het volgende commando:<br/>
-```docker exec -it add-on_<12345678>_day_ahead_opt bash```, waarbij je <12345678> 
+```docker exec -it add-on_<12345678>_day_ahead_opt_tvb bash```, waarbij je <12345678>
 vervangt door het id van de day_ahead add-on. Die id wisselt per ha installatie en vind je 
 rechtsboven op de informatie pagina van de add-on.
  * tenslotte krijg je een prompt van een shell binnen de add-on:<br>

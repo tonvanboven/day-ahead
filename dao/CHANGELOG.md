@@ -1,7 +1,8 @@
 # Changelog 刀 DAO
 # Day Ahead Optimizer
 
-# 2026.9.0
+# 2026.9.0.1
+- Changed the Home Assistant add-on slug to allow the TvB fork to coexist with the upstream DAO add-on.
 - Moved the runs of scheduler-tasks to a separate process, SIGABRT in CBC killed the scheduler (reported by @tomvandepoel3)
 - Added wget to succeed a local build of miplib (reported by @stat)
 - Corrected the "internal server error" when api called with period "vandaag", "morgen" or "vandaag_en_morgen"
