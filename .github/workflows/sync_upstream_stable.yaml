@@ -1,0 +1,79 @@
+name: Sync stable upstream release
+
+on:
+  workflow_dispatch:
+    inputs:
+      current_base_tag:
+        description: "Current stable upstream tag used as the base of main"
+        required: true
+        default: "2026.9.0"
+        type: string
+      upstream_tag:
+        description: "New stable tag from corneel27/day-ahead"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    name: Rebase fork changes onto stable upstream
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream stable tag
+        env:
+          UPSTREAM_TAG: ${{ inputs.upstream_tag }}
+        run: |
+          case "${UPSTREAM_TAG}" in
+            *rc*|*beta*|*alpha*)
+              echo "Refusing a prerelease tag: ${UPSTREAM_TAG}"
+              exit 1
+              ;;
+          esac
+          git remote add upstream https://github.com/corneel27/day-ahead.git
+          git fetch --no-tags upstream "refs/tags/${UPSTREAM_TAG}:refs/tags/${UPSTREAM_TAG}"
+
+      - name: Rebase fork commits
+        env:
+          CURRENT_BASE_TAG: ${{ inputs.current_base_tag }}
+          UPSTREAM_TAG: ${{ inputs.upstream_tag }}
+        run: |
+          git rev-parse --verify "refs/tags/${CURRENT_BASE_TAG}^{commit}"
+          git rebase --onto "${UPSTREAM_TAG}" "${CURRENT_BASE_TAG}" main
+
+      - name: Regenerate configuration documentation
+        run: |
+          python -m pip install --upgrade pip
+          grep '^pydantic' dao/requirements.txt | xargs pip install
+          python scripts/generate_docs.py
+          if ! git diff --quiet SETTINGS.md config_schema.json; then
+            git add SETTINGS.md config_schema.json
+            git commit -m "Update generated configuration documentation"
+          fi
+
+      - name: Create sync branch and pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_TAG: ${{ inputs.upstream_tag }}
+        run: |
+          branch="sync/upstream-${UPSTREAM_TAG}"
+          git switch -c "${branch}"
+          git push --force --set-upstream origin "${branch}"
+          gh pr create \
+            --base main \
+            --head "${branch}" \
+            --title "Sync stable upstream ${UPSTREAM_TAG}" \
+            --body "Rebases the fork changes onto the stable upstream tag ${UPSTREAM_TAG}. Review conflicts and behavior before merging and creating the next production release."
