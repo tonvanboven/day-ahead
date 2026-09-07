@@ -2,6 +2,7 @@
 Graphics/visualization configuration models.
 """
 
+from typing import Dict
 from pydantic import BaseModel, Field, ConfigDict
 
 
@@ -58,6 +59,14 @@ class GraphicsConfig(BaseModel):
         description="Show average consumption in graphs",
         json_schema_extra={
             "x-help": "Display average/baseline consumption in graphs. Helps understand optimization impact relative to normal usage.",
+            "x-ui-section": "Graphics",
+        },
+    )
+    colors: Dict[str, Dict[str, str]] = Field(
+        default_factory=dict,
+        description="Override graph series colors, grouped per graph and keyed by series label",
+        json_schema_extra={
+            "x-help": "Override colors per graph. Top-level keys are graph names (\"not_optimized\", \"optimized\", \"battery_balance\", \"soc_prices\"); each contains a mapping of series label to color, e.g. {\"optimized\": {\"Accu uit\": \"blue\"}, \"battery_balance\": {\"BAT<->\": \"red\"}}. Accepts matplotlib color names or hex codes. Labels not listed keep their built-in default color, so this can be a partial override.",
             "x-ui-section": "Graphics",
         },
     )

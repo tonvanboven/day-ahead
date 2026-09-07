@@ -4645,6 +4645,51 @@ class DaCalc(DaBase):
         # override the logger logging level to INFO
         pil_logger.setLevel(max(logging.INFO, self.log_level))
 
+        # default colors per graph, overridable via options.json graphics.colors
+        default_graph_colors = {
+            "not_optimized": {
+                "PV AC": "green",
+                "PV DC": "lime",
+                "Levering": "#00bfff",
+                "Overig verbr.": "#f1a603",
+                "Boiler": "#e39ff6",
+                "WP": "#a32cc4",
+                "EV laden": "yellow",
+                "Apparatuur": "brown",
+                "Teruglev.": "#0080ff",
+            },
+            "optimized": {
+                "PV AC": "green",
+                "Accu uit": "red",
+                "Levering": "#00bfff",
+                "Overig verbr.": "#f1a603",
+                "Boiler": "#e39ff6",
+                "WP": "#a32cc4",
+                "EV laden": "yellow",
+                "Apparatuur": "brown",
+                "Accu in": "#ff8000",
+                "Teruglev.": "#0080ff",
+            },
+            "battery_balance": {
+                "AC<->": "red",
+                "BAT<->": "blue",
+                "PV->": "lime",
+                "SoC": "olive",
+            },
+            "soc_prices": {
+                "SoC": "olive",
+                "Tarief levering": "#00bfff",
+                "Tarief teruglev.": "green",
+                "Spot prijzen": "orange",
+                "Tarief lev. gemid.": "#00bfff",
+            },
+        }
+        _user_colors = self.config.graphics.colors or {}
+        graph_colors = {
+            section: {**defaults, **_user_colors.get(section, {})}
+            for section, defaults in default_graph_colors.items()
+        }
+
         show_battery_balance = (
             str(self.config.graphics.battery_balance).lower() == "true"
         )
@@ -4661,7 +4706,7 @@ class DaCalc(DaBase):
                 ind,
                 np.array(pv_p_org),
                 label="PV AC",
-                color="green",
+                color=graph_colors["not_optimized"]["PV AC"],
                 align="edge",
             )
         # 2
@@ -4671,7 +4716,7 @@ class DaCalc(DaBase):
                 np.array(pv_ac_p),
                 bottom=np.array(pv_p_org),
                 label="PV DC",
-                color="lime",
+                color=graph_colors["not_optimized"]["PV DC"],
                 align="edge",
             )
         # 3
@@ -4680,12 +4725,12 @@ class DaCalc(DaBase):
             np.array(org_l),
             bottom=np.array(pv_p_org) + np.array(pv_ac_p),
             label="Levering",
-            color="#00bfff",
+            color=graph_colors["not_optimized"]["Levering"],
             align="edge",
         )
 
         axis[0].bar(
-            ind, np.array(base_n), label="Overig verbr.", color="#f1a603", align="edge"
+            ind, np.array(base_n), label="Overig verbr.", color=graph_colors["not_optimized"]["Overig verbr."], align="edge"
         )
         if self.boiler_present:
             axis[0].bar(
@@ -4693,7 +4738,7 @@ class DaCalc(DaBase):
                 np.array(boiler_n),
                 bottom=np.array(base_n),
                 label="Boiler",
-                color="#e39ff6",
+                color=graph_colors["not_optimized"]["Boiler"],
                 align="edge",
             )
         if self.hp_present:
@@ -4702,7 +4747,7 @@ class DaCalc(DaBase):
                 np.array(heatpump_n),
                 bottom=np.array(base_n) + np.array(boiler_n),
                 label="WP",
-                color="#a32cc4",
+                color=graph_colors["not_optimized"]["WP"],
                 align="edge",
             )
         if EV > 0:
@@ -4711,7 +4756,7 @@ class DaCalc(DaBase):
                 np.array(ev_n),
                 bottom=np.array(base_n) + np.array(boiler_n) + np.array(heatpump_n),
                 label="EV laden",
-                color="yellow",
+                color=graph_colors["not_optimized"]["EV laden"],
                 align="edge",
             )
         if M > 0:
@@ -4723,7 +4768,7 @@ class DaCalc(DaBase):
                 + np.array(heatpump_n)
                 + np.array(ev_n),
                 label="Apparatuur",
-                color="brown",
+                color=graph_colors["not_optimized"]["Apparatuur"],
                 align="edge",
             )
         axis[0].bar(
@@ -4735,7 +4780,7 @@ class DaCalc(DaBase):
             + np.array(ev_n)
             + np.array(mach_n),
             label="Teruglev.",
-            color="#0080ff",
+            color=graph_colors["not_optimized"]["Teruglev."],
             align="edge",
         )
         axis[0].legend(loc="best", bbox_to_anchor=(1.05, 1.00))
@@ -4761,7 +4806,7 @@ class DaCalc(DaBase):
             ind,
             np.array(pv_p_opt),
             label="PV AC",
-            color="green",
+            color=graph_colors["optimized"]["PV AC"],
             align="edge",
         )
         axis[1].bar(
@@ -4769,7 +4814,7 @@ class DaCalc(DaBase):
             np.array(accu_out_p),
             bottom=np.array(pv_p_opt),
             label="Accu uit",
-            color="red",
+            color=graph_colors["optimized"]["Accu uit"],
             align="edge",
         )
         axis[1].bar(
@@ -4777,13 +4822,13 @@ class DaCalc(DaBase):
             np.array(c_l_p),
             bottom=np.array(pv_p_opt) + np.array(accu_out_p),
             label="Levering",
-            color="#00bfff",
+            color=graph_colors["optimized"]["Levering"],
             align="edge",
         )
 
         # axis[1].bar(ind, np.array(cons_n), label="Verbruik", color='yellow')
         axis[1].bar(
-            ind, np.array(base_n), label="Overig verbr.", color="#f1a603", align="edge"
+            ind, np.array(base_n), label="Overig verbr.", color=graph_colors["optimized"]["Overig verbr."], align="edge"
         )
         if self.boiler_present:
             axis[1].bar(
@@ -4791,7 +4836,7 @@ class DaCalc(DaBase):
                 np.array(boiler_n),
                 bottom=np.array(base_n),
                 label="Boiler",
-                color="#e39ff6",
+                color=graph_colors["optimized"]["Boiler"],
                 align="edge",
             )
         if self.hp_present:
@@ -4800,7 +4845,7 @@ class DaCalc(DaBase):
                 np.array(heatpump_n),
                 bottom=np.array(base_n + np.array(boiler_n)),
                 label="WP",
-                color="#a32cc4",
+                color=graph_colors["optimized"]["WP"],
                 align="edge",
             )
         if EV > 0:
@@ -4809,7 +4854,7 @@ class DaCalc(DaBase):
                 np.array(ev_n),
                 bottom=np.array(base_n) + np.array(boiler_n) + np.array(heatpump_n),
                 label="EV laden",
-                color="yellow",
+                color=graph_colors["optimized"]["EV laden"],
                 align="edge",
             )
         if M > 0:
@@ -4821,7 +4866,7 @@ class DaCalc(DaBase):
                 + np.array(heatpump_n)
                 + np.array(ev_n),
                 label="Apparatuur",
-                color="brown",
+                color=graph_colors["optimized"]["Apparatuur"],
                 align="edge",
             )
         if B > 0:
@@ -4834,7 +4879,7 @@ class DaCalc(DaBase):
                 + np.array(ev_n)
                 + np.array(mach_n),
                 label="Accu in",
-                color="#ff8000",
+                color=graph_colors["optimized"]["Accu in"],
                 align="edge",
             )
         axis[1].bar(
@@ -4847,7 +4892,7 @@ class DaCalc(DaBase):
             + np.array(mach_n)
             + np.array(accu_in_n),
             label="Teruglev.",
-            color="#0080ff",
+            color=graph_colors["optimized"]["Teruglev."],
             align="edge",
         )
         axis[1].legend(loc="best", bbox_to_anchor=(1.05, 1.00))
@@ -4895,14 +4940,14 @@ class DaCalc(DaBase):
                 bat_p.append(0)
                 bat_n.append(0)
                 leg1 = axis[gr_no].bar(
-                    ind, np.array(ac_p), label="AC<->", color="red", align="edge"
+                    ind, np.array(ac_p), label="AC<->", color=graph_colors["battery_balance"]["AC<->"], align="edge"
                 )
                 leg2 = axis[gr_no].bar(
                     ind,
                     np.array(bat_p),
                     label="BAT<->",
                     bottom=np.array(ac_p),
-                    color="blue",
+                    color=graph_colors["battery_balance"]["BAT<->"],
                     align="edge",
                 )
                 if pv_dc_num[b] > 0:
@@ -4911,17 +4956,17 @@ class DaCalc(DaBase):
                         np.array(pv_p),
                         label="PV->",
                         bottom=np.array(ac_p) + np.array(bat_p),
-                        color="lime",
+                        color=graph_colors["battery_balance"]["PV->"],
                         align="edge",
                     )
                 else:
                     leg3 = None
-                axis[gr_no].bar(ind, np.array(ac_n), color="red", align="edge")
+                axis[gr_no].bar(ind, np.array(ac_n), color=graph_colors["battery_balance"]["AC<->"], align="edge")
                 axis[gr_no].bar(
                     ind,
                     np.array(bat_n),
                     bottom=np.array(ac_n),
-                    color="blue",
+                    color=graph_colors["battery_balance"]["BAT<->"],
                     align="edge",
                 )
                 # axis[gr_no].legend(loc='best', bbox_to_anchor=(1.30, 1.00))
@@ -4938,11 +4983,11 @@ class DaCalc(DaBase):
                 axis[gr_no].sharex(axis[0])
                 axis_20 = axis[gr_no].twinx()
                 leg4 = axis_20.plot(
-                    ind, soc_b[b], label="% SoC", linestyle="solid", color="olive"
+                    ind, soc_b[b], label="% SoC", linestyle="solid", color=graph_colors["battery_balance"]["SoC"]
                 )[0]
                 axis_20.set_ylabel("% SoC")
                 axis_20.set_ylim([0, 102])
-                soc_line = mlines.Line2D([], [], color="olive", label="SoC %")
+                soc_line = mlines.Line2D([], [], color=graph_colors["battery_balance"]["SoC"], label="SoC %")
                 if pv_dc_num[b] > 0:
                     labels = ["AC<->", "BAT<->", "PV->", "% SoC"]
                     handles = [leg1, leg2, leg3, leg4]
@@ -4965,7 +5010,7 @@ class DaCalc(DaBase):
             uur_labels.append("24")
         if B > 0:
             ln1 = axis[gr_no].plot(
-                ind, soc_t, label="SoC", linestyle=line_styles[0], color="olive"
+                ind, soc_t, label="SoC", linestyle=line_styles[0], color=graph_colors["soc_prices"]["SoC"]
             )
         axis[gr_no].set_xticks(ind, labels=uur_labels[: len(ind)])
         axis[gr_no].set_ylabel("% SoC")
@@ -4997,7 +5042,7 @@ class DaCalc(DaBase):
                 ind,
                 np.array(pl),
                 label="Tarief\nlevering",
-                color="#00bfff",
+                color=graph_colors["soc_prices"]["Tarief levering"],
                 where="post",
             )
         else:
@@ -5018,7 +5063,7 @@ class DaCalc(DaBase):
                 ind,
                 np.array(pt),
                 label="Tarief\nteruglev.",
-                color="green",  # "#0080ff",
+                color=graph_colors["soc_prices"]["Tarief teruglev."],  # "#0080ff",
                 where="post",
             )
         else:
@@ -5030,7 +5075,7 @@ class DaCalc(DaBase):
                 ind,
                 np.array(p_spot),
                 label="Spot prijzen",
-                color="orange",
+                color=graph_colors["soc_prices"]["Spot prijzen"],
                 where="post",
             )
         else:
@@ -5052,7 +5097,7 @@ class DaCalc(DaBase):
                 np.array(pl_avg),
                 label="Tarief lev.\ngemid.",
                 linestyle="dashed",
-                color="#00bfff",
+                color=graph_colors["soc_prices"]["Tarief lev. gemid."],
             )
         else:
             ln4 = None

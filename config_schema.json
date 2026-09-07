@@ -1304,6 +1304,19 @@
           "type": "boolean",
           "x-help": "Display average/baseline consumption in graphs. Helps understand optimization impact relative to normal usage.",
           "x-ui-section": "Graphics"
+        },
+        "colors": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "description": "Override graph series colors, grouped per graph and keyed by series label",
+          "title": "Colors",
+          "type": "object",
+          "x-help": "Override colors per graph. Top-level keys are graph names (\"not_optimized\", \"optimized\", \"battery_balance\", \"soc_prices\"); each contains a mapping of series label to color, e.g. {\"optimized\": {\"Accu uit\": \"blue\"}, \"battery_balance\": {\"BAT<->\": \"red\"}}. Accepts matplotlib color names or hex codes. Labels not listed keep their built-in default color, so this can be a partial override.",
+          "x-ui-section": "Graphics"
         }
       },
       "title": "GraphicsConfig",

@@ -1433,6 +1433,7 @@ Graphs can show:
 | `prices production` | boolean | No | `false` | Show production prices in graphs |
 | `prices spot` | boolean | No | `true` | Show spot prices in graphs |
 | `average consumption` | boolean | No | `true` | Show average consumption in graphs |
+| `colors` | object | No | `null` | Override graph series colors, grouped per graph and keyed by series label |
 
 <details>
 <summary><b>📖 Field Details</b> (click to expand)</summary>
@@ -1460,6 +1461,10 @@ Display raw day-ahead spot market prices (before taxes/markup) in graphs. Shows 
 **`average consumption`**
 
 Display average/baseline consumption in graphs. Helps understand optimization impact relative to normal usage.
+
+**`colors`**
+
+Override colors per graph. Top-level keys are graph names ("not_optimized", "optimized", "battery_balance", "soc_prices"); each contains a mapping of series label to color, e.g. {"optimized": {"Accu uit": "blue"}, "battery_balance": {"BAT<->": "red"}}. Accepts matplotlib color names or hex codes. Labels not listed keep their built-in default color, so this can be a partial override.
 
 </details>
 
