@@ -1,10 +1,10 @@
 ---
 name: 刀 Day Ahead Optimizer (TvB) (TESTING)
-version: 2026.9.0.rc2
+version: 2026.9.0.rc3
 stage: experimental
 slug: day_ahead_opt-testing
 description: Beta version of DAO. Use only for testing!
-url: https://github.com/corneel27/day-ahead/
+url: https://github.com/tonvanboven/day-ahead
 arch:
   - aarch64
   - amd64
@@ -27,4 +27,4 @@ options:
   use_self_compiled_miplib: false
 schema:
   use_self_compiled_miplib: bool?
-image: "ghcr.io/corneel27/dao"
+image: "ghcr.io/tonvanboven/{arch}-dao"

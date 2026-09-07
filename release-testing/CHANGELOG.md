@@ -1,6 +1,9 @@
 # Changelog 刀 DAO
 # Day Ahead Optimizer
 
+# 2026.9.0.rc3
+Fixed testing image field still pointing at ghcr.io/corneel27/dao; added JSON API endpoints for external clients (Home Assistant dashboard) and configurable graph colors
+
 # 2026.9.0.rc2
 Fixed error when getting flex-value from HA (reported by $tomvandepoel3)
 
