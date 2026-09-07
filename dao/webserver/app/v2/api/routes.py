@@ -197,8 +197,8 @@ def status():
         loader = ConfigurationLoader(Path(app_datapath + "options.json"))
         config = loader.load_and_validate()
         result["config"] = {
-            "interval": getattr(config, "interval", None),
-            "strategy": getattr(config, "strategy", None),
+            "interval": _flex_value(getattr(config, "interval", None)),
+            "strategy": _flex_value(getattr(config, "strategy", None)),
             "solar_count": len(config.solar),
             "battery_count": len(config.battery),
             "ml_solar_devices": sorted(get_solar_items_with_ml().keys()),
@@ -207,6 +207,11 @@ def status():
         result["config"] = None
         result["config_error"] = str(ex)
     return jsonify(result)
+
+
+def _flex_value(value):
+    """Unwraps a FlexValue/FlexEnum instance to its plain configured value."""
+    return getattr(value, "value", value)
 
 
 @api.route("/vars/")

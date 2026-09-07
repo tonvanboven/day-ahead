@@ -1,6 +1,9 @@
 # Changelog 刀 DAO
 # Day Ahead Optimizer
 
+# 2026.9.0.rc4
+Fixed 500 error on /v2/api/status/ (FlexEnum not JSON serializable)
+
 # 2026.9.0.rc3
 Fixed testing image field still pointing at ghcr.io/corneel27/dao; added JSON API endpoints for external clients (Home Assistant dashboard) and configurable graph colors
 
