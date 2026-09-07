@@ -10,6 +10,39 @@ ongewijzigd is gebleven - teruggegeven als ISO-8601 met tijdzone-offset.
 Met de queryparameter `timezone` (bijv. `timezone=Europe/Brussels`) kan een
 andere tijdzone dan `Europe/Amsterdam` worden gekozen.
 
+## Verhouding tot de oudere api onder `/api/`
+
+Naast deze v2-api bestaat de oudere api onder `/api/`, beschreven in de wiki:
+[6. Gebruik van de API](https://github.com/corneel27/day-ahead/wiki/6.-Gebruik-van-de-API).
+Die blijft werken; er verandert niets aan. Twee van de endpoints hieronder
+komen ervoor in de plaats:
+
+| oud (legacy)                        | nieuw                                       | waarom                                                                                                                     |
+|-------------------------------------|---------------------------------------------|----------------------------------------------------------------------------------------------------------------------------|
+| `GET /api/run/<bewerking>`          | `POST /v2/api/task-exec/` + `/task-state/`  | het oude endpoint blokkeert tot de taak klaar is en levert html; een optimalisering duurt langer dan de meeste http-timeouts |
+| `GET /api/report/da/<periode>`      | `GET /v2/api/prices/`                       | vrije start- en einddatum in plaats van vaste periodenamen, plus de dagstatistieken (min, max, gemiddelde, goedkoopste uren) |
+
+Ook `GET /v2/api/run/<task>` blokkeert en is daarmee vervangen door
+`/task-exec/`; zie de opmerking onderaan.
+
+Voor de overige velden van `/api/report/<veld>/<periode>` is er geen
+vervanging nodig: `/v2/api/data/` levert dezelfde gegevens, maar dan alle
+gevraagde variabelen in één aanroep en over een vrij te kiezen periode. Wie de
+oude vorm gebruikt hoeft niets te wijzigen.
+
+De namen van de taken verschillen tussen oud en nieuw:
+
+| `/api/run/<bewerking>` | `/v2/api/task-exec/` |
+|------------------------|----------------------|
+| `calc_zonder_debug`    | `optimize`           |
+| `calc_met_debug`       | `optimize_debug`     |
+| `get_prices`           | `prices`             |
+| `get_meteo`            | `meteo`              |
+| `get_tibber`           | `tibber`             |
+| `calc_baseloads`       | `calc_baseloads`     |
+| `train_ml_predictions` | `train_ml`           |
+| (geen)                 | `consolidate`, `clean` |
+
 ## Data
 
 ### `GET /v2/api/data/`
@@ -39,6 +72,12 @@ De variabelen waarvoor daadwerkelijk data aanwezig is: `[{"code", "name"}]`.
 De day ahead tarieven per uur, inclusief morgen zodra die gepubliceerd zijn.
 Parameters `start` en `end` zijn optionele datums (standaard vandaag t/m
 overmorgen).
+
+Dit endpoint komt in de plaats van `GET /api/report/da/<periode>`. Het verschil
+is dat de periode vrij te kiezen is in plaats van een vaste naam als
+`vandaag_en_morgen`, en dat de dagstatistieken (min, max, gemiddelde en de
+goedkoopste uren) meekomen in plaats van dat de client ze zelf uitrekent. De
+oude aanroep blijft gewoon werken.
 
 ```json
 {
@@ -96,6 +135,12 @@ Start een taak asynchroon. Body als json (`{"task": "optimize"}`) of
 form-encoded. Antwoordt met `202` bij starten, `409` als er al een taak loopt
 en `400` bij een onbekende taak.
 
+Dit is de opvolger van `GET /api/run/<bewerking>`. Waar het oude endpoint
+wacht tot de taak klaar is en de log als html-pagina teruggeeft, keert dit
+endpoint direct terug en volg je de taak via `/task-state/`. Het deelt zijn
+statusbestand met de web-ui, zodat de ui en een api-client dezelfde lopende
+taak zien en er niet twee tegelijk gestart kunnen worden.
+
 Geldige taken: `optimize` (alias `optimize_regular`), `optimize_debug`,
 `prices` (`update_prices`), `meteo` (`update_meteo`), `tibber`
 (`update_tibber`), `calc_baseloads`, `train_ml`, `consolidate`, `clean`.
@@ -109,8 +154,24 @@ hij loopt en de laatste 8000 tekens van het logbestand.
 
 Breekt de lopende taak af.
 
-### `GET /v2/api/run/<task>`
+### `GET /v2/api/run/<task>` (legacy)
 
 Draait een taak *synchroon* en geeft de log als platte tekst terug. Bedoeld
 voor handmatig gebruik; gebruik voor clients `/task-exec/`, omdat een
-optimalisering langer kan duren dan de meeste http-timeouts.
+optimalisering langer kan duren dan de meeste http-timeouts. Dit endpoint
+kent geen bescherming tegen twee taken tegelijk en deelt zijn status niet met
+de web-ui.
+
+## Legacy: de api onder `/api/`
+
+Deze endpoints blijven ongewijzigd werken en zijn beschreven in de wiki:
+[6. Gebruik van de API](https://github.com/corneel27/day-ahead/wiki/6.-Gebruik-van-de-API).
+Ze staan hier alleen om de verhouding tot de v2-api duidelijk te maken.
+
+| endpoint                                | status  | opmerking                                                          |
+|-----------------------------------------|---------|--------------------------------------------------------------------|
+| `GET /api/run/<bewerking>`              | legacy  | synchroon, levert html; vervangen door `/v2/api/task-exec/`         |
+| `GET /api/report/<veld>/<periode>`      | in gebruik | voor `da` vervangen door `/v2/api/prices/`; overige velden ook in `/v2/api/data/` |
+
+`GET /api/prognose/<veld>` staat in de broncode maar is uitgecommentarieerd en
+bestaat dus niet als route.
