@@ -1,6 +1,7 @@
 import pytest
 from pydantic import BaseModel, ValidationError
 from dao.prog.config.models.base import EntityId, FlexValue, FlexFloat, FlexInt, FlexBool, FlexStr, SecretStr
+from dao.prog.config.models.graphics import GraphicsConfig
 
 
 class _Model(BaseModel):
@@ -207,3 +208,16 @@ class TestSocPowerLimit:
         dumped = s.model_dump()
         assert dumped == {"soc": 95, "power": 2500}
         assert "helling" not in dumped
+
+
+class TestGraphicsConfig:
+    def test_default_color_palette_is_exposed_in_schema(self):
+        schema = GraphicsConfig.model_json_schema()
+        assert "colors" in schema["properties"]
+
+        cfg = GraphicsConfig()
+        assert cfg.colors["not_optimized"]["PV AC"] == "green"
+        assert cfg.colors["optimized"]["Accu uit"] == "red"
+        assert cfg.colors["battery_balance"]["SoC"] == "olive"
+        assert cfg.colors["soc_prices"]["Spot prijzen"] == "orange"
+        assert cfg.colors["energy_balance"]["Levering"] == "#00bfff"

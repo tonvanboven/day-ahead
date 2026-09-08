@@ -1312,6 +1312,20 @@
           "type": "boolean",
           "x-help": "Display average/baseline consumption in graphs. Helps understand optimization impact relative to normal usage.",
           "x-ui-section": "Graphics"
+        },
+        "colors": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "description": "Optional per-graph custom colors, keyed by graph section and visible series label",
+          "title": "Colors",
+          "type": "object",
+          "x-help": "Optional color overrides for generated graphs. Use a top-level graph section like 'not_optimized' or 'battery_balance', then map the visible series label to a CSS or hex color. Leave the block empty to keep the built-in DAO palette.",
+          "x-ui-section": "Graphics",
+          "x-ui-widget": "object"
         }
       },
       "title": "GraphicsConfig",

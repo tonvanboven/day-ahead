@@ -1439,6 +1439,7 @@ Graphs can show:
 | `prices spot` | boolean | No | `true` | Show spot prices in graphs |
 | `price zero line` | boolean | No | `false` | Show a zero reference line on the price axis in graphs |
 | `average consumption` | boolean | No | `true` | Show average consumption in graphs |
+| `colors` | object | No | `null` | Optional per-graph custom colors, keyed by graph section and visible series label |
 
 <details>
 <summary><b>📖 Field Details</b> (click to expand)</summary>
@@ -1470,6 +1471,10 @@ Display a horizontal zero reference line on the price axis of the lower SoC/pric
 **`average consumption`**
 
 Display average/baseline consumption in graphs. Helps understand optimization impact relative to normal usage.
+
+**`colors`**
+
+Optional color overrides for generated graphs. Use a top-level graph section like 'not_optimized' or 'battery_balance', then map the visible series label to a CSS or hex color. Leave the block empty to keep the built-in DAO palette.
 
 </details>
 
