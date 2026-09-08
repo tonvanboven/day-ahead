@@ -2,6 +2,7 @@
 Graphics/visualization configuration models.
 """
 
+from typing import Dict
 from pydantic import BaseModel, Field, ConfigDict
 
 
@@ -70,7 +71,7 @@ class GraphicsConfig(BaseModel):
             "x-ui-section": "Graphics",
         },
     )
-    colors: dict[str, dict[str, str]] = Field(
+    colors: Dict[str, Dict[str, str]] = Field(
         default_factory=lambda: {
             "not_optimized": {
                 "PV AC": "green",
@@ -123,7 +124,7 @@ class GraphicsConfig(BaseModel):
         },
         description="Optional per-graph custom colors, keyed by graph section and visible series label",
         json_schema_extra={
-            "x-help": "Optional color overrides for generated graphs. Use a top-level graph section like 'not_optimized' or 'battery_balance', then map the visible series label to a CSS or hex color. Leave the block empty to keep the built-in DAO palette.",
+            "x-help": "Override colors per graph. Top-level keys are graph names (\"not_optimized\", \"optimized\", \"battery_balance\", \"soc_prices\"); each contains a mapping of series label to color, e.g. {\"optimized\": {\"Accu uit\": \"blue\"}, \"battery_balance\": {\"BAT<->\": \"red\"}}. Accepts matplotlib color names or hex codes. Labels not listed keep their built-in default color, so this can be a partial override.",
             "x-ui-section": "Graphics",
             "x-ui-widget": "object",
         },
