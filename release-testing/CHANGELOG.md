@@ -1,5 +1,8 @@
 # Changelog 刀 DAO
 # Day Ahead Optimizer
+# 2026.9.1.rc2
+- Combined the HA dashboard JSON API changes with configurable graph colors for integrated testing
+
 # 2026.9.1.rc1
 - removed us of pipe, let the child inherit the scheduler's stdout/stderr: (#812)
 - added git and nano to installed packages
