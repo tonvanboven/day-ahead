@@ -1,6 +1,10 @@
 # Changelog 刀 DAO
 # Day Ahead Optimizer
 
+# 2026.9.0.2
+- Added the external JSON API for the Home Assistant dashboard.
+- Added configurable graph colors through options.json, including report graphs.
+
 # 2026.9.0.1
 - Changed the Home Assistant add-on slug to allow the TvB fork to coexist with the upstream DAO add-on.
 - Moved the runs of scheduler-tasks to a separate process, SIGABRT in CBC killed the scheduler (reported by @tomvandepoel3)
