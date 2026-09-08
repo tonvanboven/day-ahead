@@ -70,6 +70,64 @@ class GraphicsConfig(BaseModel):
             "x-ui-section": "Graphics",
         },
     )
+    colors: dict[str, dict[str, str]] = Field(
+        default_factory=lambda: {
+            "not_optimized": {
+                "PV AC": "green",
+                "PV DC": "lime",
+                "Levering": "#00bfff",
+                "Overig verbr.": "#f1a603",
+                "Boiler": "#e39ff6",
+                "WP": "#a32cc4",
+                "EV laden": "yellow",
+                "Apparatuur": "brown",
+                "Teruglev.": "#0080ff",
+            },
+            "optimized": {
+                "PV AC": "green",
+                "Accu uit": "red",
+                "Levering": "#00bfff",
+                "Overig verbr.": "#f1a603",
+                "Boiler": "#e39ff6",
+                "WP": "#a32cc4",
+                "EV laden": "yellow",
+                "Apparatuur": "brown",
+                "Accu in": "#ff8000",
+                "Teruglev.": "#0080ff",
+            },
+            "battery_balance": {
+                "AC<->": "red",
+                "BAT<->": "blue",
+                "PV->": "lime",
+                "SoC": "olive",
+            },
+            "soc_prices": {
+                "SoC": "olive",
+                "Tarief levering": "#00bfff",
+                "Tarief teruglev.": "green",
+                "Spot prijzen": "orange",
+                "Tarief lev. gemid.": "#00bfff",
+            },
+            "energy_balance": {
+                "Levering": "#00bfff",
+                "Teruglev.": "#0080ff",
+                "Accu uit": "red",
+                "Accu in": "#ff8000",
+                "PV AC": "green",
+                "EV laden": "yellow",
+                "WP": "#a32cc4",
+                "Boiler": "#e39ff6",
+                "Apparatuur": "brown",
+                "Overig verbr.": "#f1a603",
+            },
+        },
+        description="Optional per-graph custom colors, keyed by graph section and visible series label",
+        json_schema_extra={
+            "x-help": "Optional color overrides for generated graphs. Use a top-level graph section like 'not_optimized' or 'battery_balance', then map the visible series label to a CSS or hex color. Leave the block empty to keep the built-in DAO palette.",
+            "x-ui-section": "Graphics",
+            "x-ui-widget": "object",
+        },
+    )
 
     model_config = ConfigDict(
         extra="allow",
