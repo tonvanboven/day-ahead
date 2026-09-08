@@ -1,12 +1,7 @@
 # Changelog 刀 DAO
 # Day Ahead Optimizer
-# 2026.9.1.rc2
+# 2026.9.0.rc5
 - Combined the HA dashboard JSON API changes with configurable graph colors for integrated testing
-
-# 2026.9.1.rc1
-- removed us of pipe, let the child inherit the scheduler's stdout/stderr: (#812)
-- added git and nano to installed packages
-- corrected finish day_ahead.py on arm64 to prevent crash with error -4
 
 # 2026.9.0.rc2
 Fixed error when getting flex-value from HA (reported by $tomvandepoel3)
