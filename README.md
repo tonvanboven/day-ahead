@@ -21,6 +21,8 @@ Deze release van de Ton van Boven-fork is gebaseerd op de stabiele productievers
 oorspronkelijke [DAO-repository `corneel27/day-ahead`](https://github.com/corneel27/day-ahead). Updates uit latere
 release candidates zijn niet opgenomen.
 
+De oorspronkelijke upstream-repository is dus de public DAO-repo van Cees van Beek: [corneel27/day-ahead](https://github.com/corneel27/day-ahead).
+
 Ten opzichte van die productieversie bevat deze fork de volgende eigen aanpassingen:
 
 * vooraf laden van batterij- en EV-regelingen voor het volgende interval, inclusief het optioneel herstellen van
