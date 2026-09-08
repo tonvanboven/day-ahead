@@ -68,6 +68,25 @@ class Report(DaBase):
         self.boiler_consumption_sensors = _r.entities_boiler_consumption if _r else []
         self.machine_consumption_sensors = _r.entities_machine_consumption if _r else []
 
+        # default colors for the energy balance report graph, overridable via
+        # options.json graphics.colors.energy_balance
+        report_default_colors = {
+            "Levering": "#00bfff",
+            "Teruglev.": "#0080ff",
+            "Accu uit": "red",
+            "Accu in": "#ff8000",
+            "PV AC": "green",
+            "EV laden": "yellow",
+            "WP": "#a32cc4",
+            "Boiler": "#e39ff6",
+            "Apparatuur": "brown",
+            "Overig verbr.": "#f1a603",
+        }
+        self._report_colors = {
+            **report_default_colors,
+            **((self.config.graphics.colors or {}).get("energy_balance", {})),
+        }
+
         self.saving_consumption_dict = {
             "calc_interval": "uur",
             "series": {
@@ -452,63 +471,63 @@ class Report(DaBase):
                 "sign": "pos",
                 "name": "Verbruik",
                 "sensors": self.grid_consumption_sensors,
-                "color": "#00bfff",
+                "color": self._report_colors["Levering"],
             },
             "prod": {
                 "dim": "kWh",
                 "sign": "neg",
                 "name": "Productie",
                 "sensors": self.grid_production_sensors,
-                "color": "#0080ff",
+                "color": self._report_colors["Teruglev."],
             },
             "bat_out": {
                 "dim": "kWh",
                 "sign": "pos",
                 "name": "Accu_uit",
                 "sensors": self.battery_production_sensors,
-                "color": "red",
+                "color": self._report_colors["Accu uit"],
             },
             "bat_in": {
                 "dim": "kWh",
                 "sign": "neg",
                 "name": "Accu in",
                 "sensors": self.battery_consumption_sensors,
-                "color": "#ff8000",
+                "color": self._report_colors["Accu in"],
             },
             "pv_ac": {
                 "dim": "kWh",
                 "sign": "pos",
                 "name": "PV ac",
                 "sensors": self.solar_production_ac_sensors,
-                "color": "green",
+                "color": self._report_colors["PV AC"],
             },
             "ev": {
                 "dim": "kWh",
                 "sign": "neg",
                 "name": "Elec. vehicle",
                 "sensors": self.ev_consumption_sensors,
-                "color": "yellow",
+                "color": self._report_colors["EV laden"],
             },
             "wp": {
                 "dim": "kWh",
                 "sign": "neg",
                 "name": "WP",
                 "sensors": self.wp_consumption_sensors,
-                "color": "#a32cc4",
+                "color": self._report_colors["WP"],
             },
             "boil": {
                 "dim": "kWh",
                 "sign": "neg",
                 "name": "Boiler",
                 "sensors": self.boiler_consumption_sensors,
-                "color": "#e39ff6",
+                "color": self._report_colors["Boiler"],
             },
             "mach": {
                 "dim": "kWh",
                 "sign": "neg",
                 "name": "Machines",
                 "sensors": self.machine_consumption_sensors,
-                "color": "brown",
+                "color": self._report_colors["Apparatuur"],
             },
             "base": {
                 "dim": "kWh",
@@ -516,7 +535,7 @@ class Report(DaBase):
                 "name": "Baseload",
                 "sensors": "calc",
                 "function": "calc_base",
-                "color": "#f1a603",
+                "color": self._report_colors["Overig verbr."],
             },
         }
 

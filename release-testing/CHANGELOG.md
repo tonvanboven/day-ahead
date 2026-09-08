@@ -1,5 +1,7 @@
 # Changelog 刀 DAO
 # Day Ahead Optimizer
+# 2026.9.0.rc5
+- Combined the HA dashboard JSON API changes with configurable graph colors for integrated testing
 
 # 2026.9.0.rc4
 Fixed 500 error on /v2/api/status/ (FlexEnum not JSON serializable)
