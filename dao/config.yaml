@@ -1,12 +1,3 @@
-<<<<<<< HEAD
-name: 刀 Day Ahead Optimizer (TvB)
-version: 2026.9.0.2
-slug: day_ahead_opt_tvb
-=======
-name: 刀 Day Ahead Optimizer
-version: 2026.9.1
-slug: day_ahead_opt
->>>>>>> upstream/main
 ---
 name: 刀 Day Ahead Optimizer (TvB)
 version: 2026.9.1

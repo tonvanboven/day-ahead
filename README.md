@@ -17,17 +17,14 @@ Het programma draait alleen als addon op HA-installaties met een arm64 processor
 een intel 64 bit processor (amd64). Maar het kan ook separate Docker-container worden geinstalleerd
 
 ## Deze fork
-Deze release van de Ton van Boven-fork is gebaseerd op de stabiele productieversie `2026.9.0` van de
-oorspronkelijke [DAO-repository `corneel27/day-ahead`](https://github.com/corneel27/day-ahead). Updates uit latere
-release candidates zijn niet opgenomen.
-
-De oorspronkelijke upstream-repository is dus de public DAO-repo van Cees van Beek: [corneel27/day-ahead](https://github.com/corneel27/day-ahead).
+Deze release is gebaseerd op de stabiele productieversie `2026.9.1` van de oorspronkelijke [DAO-repository `corneel27/day-ahead`](https://github.com/corneel27/day-ahead). Updates uit latere release candidates zijn niet opgenomen.
 
 Ten opzichte van die productieversie bevat deze fork de volgende eigen aanpassingen:
 
 * vooraf laden van batterij- en EV-regelingen voor het volgende interval, inclusief het optioneel herstellen van
     het berekende grid-setpoint;
 * een optionele nulreferentielijn in prijsgrafieken;
+* een JSON API voor het eigen [da-dashboard](https://github.com/dewi-ny-je/day-ahead-ha) en andere externe clients;
 * de GitHub-verwijzing in de V2-webinterface verwijst naar de publieke Ton van Boven-fork; de Wiki-verwijzingen
     blijven naar de bestaande upstream-Wiki verwijzen;
 * configuratie en Docker-images voor de Ton van Boven-fork.
