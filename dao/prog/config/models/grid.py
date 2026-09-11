@@ -45,9 +45,9 @@ class GridConfig(BaseModel):
     preload_next_interval_controls: bool = Field(
         default=False,
         alias="preload next interval controls",
-        description="Restore cached battery and EV controls at the start of the next interval",
+        description="Restore cached battery mode/feed-in and EV controls at the start of the next interval",
         json_schema_extra={
-            "x-help": "Optional: apply cached battery feed-in values and EV charging amperes for the exact start of the next interval before a new optimization finishes.",
+            "x-help": "Optional: apply cached battery feed-in values, battery operating mode, and EV charging amperes at the exact start of the next interval before a new optimization finishes.",
             "x-ui-section": "Power Configuration",
             "x-ui-widget-filter": "switch",
         },

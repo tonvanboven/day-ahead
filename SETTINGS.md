@@ -408,7 +408,7 @@ Optimizer ensures combined consumption never exceeds this limit:
 | `max_power` | number | No | `17` | Maximum grid power in kW (Unit: `kW`) _Must be > 0, typical 7-25 kW for residential_ |
 | `entity balance switch` | [EntityId](#entityid) (optional) | No | `null` | HA entity for grid balancing switch |
 | `entity grid setpoint` | [EntityId](#entityid) (optional) | No | `null` | HA entity for the grid setpoint |
-| `preload next interval controls` | boolean | No | `false` | Restore cached battery and EV controls at the start of the next interval |
+| `preload next interval controls` | boolean | No | `false` | Restore cached battery mode/feed-in and EV controls at the start of the next interval |
 
 <details>
 <summary><b>📖 Field Details</b> (click to expand)</summary>
@@ -427,7 +427,7 @@ Optional: Home Assistant entity to save the average calculated power on the grid
 
 **`preload next interval controls`**
 
-Optional: apply cached battery feed-in values and EV charging amperes for the exact start of the next interval before a new optimization finishes.
+Optional: apply cached battery feed-in values, battery operating mode, and EV charging amperes at the exact start of the next interval before a new optimization finishes.
 
 </details>
 

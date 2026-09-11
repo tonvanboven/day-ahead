@@ -621,7 +621,7 @@ Vanaf versie 2025.12.0 is daar bijgekomen:
 
 #### Preload next interval controls
 Met de optie `grid -> preload next interval controls` kan DAO de berekende instellingen voor het volgende interval alvast bewaren in een JSON-bestand. Bij het begin van dat volgende kwartier of uur kan DAO dan, nog voordat de nieuwe optimalisatie klaar is, alvast de berekende aansturing zetten voor:
-- batterijen: het berekende feed-in/laad- of ontlaadvermogen en de operating mode
+- batterijen: het berekende feed-in/laad- of ontlaadvermogen en de waarde voor `entity set operating mode`.
 - EV's: de berekende laadampere
 
 DAO gebruikt deze cache alleen als het opgeslagen interval exact overeenkomt met het interval dat net is gestart. Zo wordt voorkomen dat verouderde cache-waarden later alsnog worden toegepast.

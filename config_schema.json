@@ -1383,10 +1383,10 @@
         },
         "preload next interval controls": {
           "default": false,
-          "description": "Restore cached battery and EV controls at the start of the next interval",
+          "description": "Restore cached battery mode/feed-in and EV controls at the start of the next interval",
           "title": "Preload Next Interval Controls",
           "type": "boolean",
-          "x-help": "Optional: apply cached battery feed-in values and EV charging amperes for the exact start of the next interval before a new optimization finishes.",
+          "x-help": "Optional: apply cached battery feed-in values, battery operating mode, and EV charging amperes at the exact start of the next interval before a new optimization finishes.",
           "x-ui-section": "Power Configuration",
           "x-ui-widget-filter": "switch"
         }
