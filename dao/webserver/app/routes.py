@@ -6,7 +6,7 @@ import time
 # from sqlalchemy.sql.coercions import expect_col_expression_collection
 
 from . import app
-from flask import render_template, request, jsonify, session as flask_session
+from flask import render_template, request, jsonify, redirect, url_for, session as flask_session
 from markupsafe import escape
 import fnmatch
 import os
@@ -315,6 +315,9 @@ def get_file_list(path: str, pattern: str) -> list:
 
 @app.route("/", methods=["POST", "GET"])
 def menu():
+    if request.method == "GET" and config is not None and config.dashboard.ui_version == "v2":
+        return redirect(url_for("v2.chart"))
+
     # check_web_menu_items()
     lst = request.form.to_dict(flat=False)
     if "current_menu" in lst:

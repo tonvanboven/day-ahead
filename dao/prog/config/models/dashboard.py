@@ -2,11 +2,22 @@
 Dashboard/web UI configuration models.
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, Field, ConfigDict
 
 
 class DashboardConfig(BaseModel):
     """Dashboard web UI configuration."""
+
+    ui_version: Literal["v1", "v2"] = Field(
+        default="v1",
+        alias="ui version",
+        description="Default web UI version",
+        json_schema_extra={
+            "x-help": "Choose the web UI that opens at the dashboard root URL. Missing values default to V1.",
+        },
+    )
 
     port: int = Field(
         default=5000,

@@ -2,6 +2,19 @@ import pytest
 from pydantic import BaseModel, ValidationError
 from dao.prog.config.models.base import EntityId, FlexValue, FlexFloat, FlexInt, FlexBool, FlexStr, SecretStr
 from dao.prog.config.models.graphics import GraphicsConfig
+from dao.prog.config.models.dashboard import DashboardConfig
+
+
+class TestDashboardConfig:
+    def test_missing_ui_version_defaults_to_v1(self):
+        assert DashboardConfig().ui_version == "v1"
+
+    def test_ui_version_accepts_v2(self):
+        assert DashboardConfig(**{"ui version": "v2"}).ui_version == "v2"
+
+    def test_ui_version_rejects_unknown_value(self):
+        with pytest.raises(ValidationError):
+            DashboardConfig(**{"ui version": "v3"})
 
 
 class _Model(BaseModel):
