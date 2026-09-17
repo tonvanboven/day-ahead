@@ -315,6 +315,8 @@ def get_file_list(path: str, pattern: str) -> list:
 
 @app.route("/", methods=["POST", "GET"])
 def menu():
+    if request.method == "GET":
+        create_config()
     if request.method == "GET" and config is not None and config.dashboard.ui_version == "v2":
         return redirect(url_for("v2.chart"))
 
@@ -349,6 +351,11 @@ def menu():
             return settings()
         else:
             return home()
+
+
+@app.route("/legacy", methods=["GET", "POST"])
+def legacy():
+    return home()
 
 
 @app.route("/", methods=["POST", "GET"])
