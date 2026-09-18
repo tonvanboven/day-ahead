@@ -99,7 +99,10 @@ class DaCalc(DaBase):
         # self.start_logging()
 
     def _preload_next_interval_controls_enabled(self) -> bool:
-        return bool(getattr(self.grid, "preload_next_interval_controls", False))
+        return any(
+            battery.preload_next_interval_controls
+            for battery in self.battery_options
+        )
 
     def restore_next_interval_controls(self, interval_start: dt.datetime):
         """Restore cached battery and EV controls for the exact next interval."""

@@ -4,6 +4,7 @@
 - removed us of pipe, let the child inherit the scheduler's stdout/stderr: (#812)
 - added git and nano to the installed packages
 - corrected finish day_ahead.py on arm64 to prevent crash with error -4
+- Moved `preload_next_interval_controls` in `options.json` from `grid` to each applicable `battery` entry. Update this location when upgrading.
 
 # 2026.9.0.2
 - Added the external JSON API for the Home Assistant dashboard.

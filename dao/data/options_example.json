@@ -156,8 +156,7 @@
   },
   "grid": {
     "max_power": 17,
-    "entity balance switch": "input_boolean.balanceer_grid",
-    "preload next interval controls": true
+    "entity balance switch": "input_boolean.balanceer_grid"
   },
   "history": {
     "save days": 7
@@ -226,6 +225,7 @@
       "name": "Accu1",
       "entity actual level": "sensor.ess_battery_soc",
       "capacity": 28,
+      "preload next interval controls": true,
       "upper limit": 98,
       "lower limit": 21,
       "optimal lower level": 21,
