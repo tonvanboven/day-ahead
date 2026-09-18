@@ -1,6 +1,7 @@
 import json
 import math
 import os
+import sys
 import threading
 import time
 
@@ -292,8 +293,19 @@ def task_exec_json():
     }
     save_task_state(state)
 
-    cmd = ["python3", "../prog/day_ahead.py", *API_TASKS[task]]
-    threading.Thread(target=run_and_log, args=(cmd, state), daemon=True).start()
+    cmd = [sys.executable, "../prog/day_ahead.py", *API_TASKS[task]]
+    logfile = (
+        "../data/log/"
+        + task
+        + "_tmp_"
+        + datetime.now().strftime("%Y-%m-%d__%H:%M:%S")
+        + ".log"
+    )
+    threading.Thread(
+        target=run_and_log,
+        args=(cmd, task, logfile),
+        daemon=True,
+    ).start()
 
     return jsonify({"started": True, "task": task}), 202
 

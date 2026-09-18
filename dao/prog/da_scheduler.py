@@ -1,6 +1,8 @@
 import datetime
+import logging
 import sys
 import time
+from subprocess import Popen
 from da_base import DaBase
 
 
@@ -11,6 +13,20 @@ class DaScheduler(DaBase):
         self.scheduler_tasks = {
             entry.time: entry.action for entry in self.config.scheduler.schedule
         }
+        self.start_early_seconds = self.config.scheduler.start_early_seconds
+        logging.info(
+            "Scheduler start early seconds from options.json: %s",
+            self.start_early_seconds,
+        )
+
+    def run_task_process(self, key_task):
+        run_task = self.tasks[key_task]
+        proc = Popen(run_task["cmd"])
+        proc.wait()
+        if proc.returncode != 0 and proc.returncode is not None:
+            print(f"Task {key_task} crashed with exit code {proc.returncode}")
+            return False
+        return True
 
     def scheduler(self):
         # if not (self.notification_entity is None) and self.notification_opstarten:
@@ -19,11 +35,20 @@ class DaScheduler(DaBase):
 
         while True:
             t = datetime.datetime.now()
-            next_min = t - datetime.timedelta(
-                minutes=-1, seconds=t.second, microseconds=t.microsecond
+            next_min = t.replace(second=0, microsecond=0) + datetime.timedelta(
+                minutes=1
             )
-            # wacht tot hele minuut 0% cpu
-            time.sleep((next_min - t).total_seconds())
+            start_at = next_min - datetime.timedelta(
+                seconds=self.start_early_seconds
+            )
+            logging.info(
+                "Scheduler timing: now=%s, scheduled=%s, start_at=%s, early_seconds=%s",
+                t.strftime("%Y-%m-%d %H:%M:%S"),
+                next_min.strftime("%Y-%m-%d %H:%M:%S"),
+                start_at.strftime("%Y-%m-%d %H:%M:%S"),
+                self.start_early_seconds,
+            )
+            time.sleep(max(0, (start_at - t).total_seconds()))
             if not self.active:
                 continue
             hour = next_min.hour
@@ -45,7 +70,7 @@ class DaScheduler(DaBase):
                 for key_task in self.tasks:
                     if self.tasks[key_task]["function"] == task:
                         try:
-                            self.run_task_function(key_task, True)
+                            self.run_task_process(key_task)
                         except KeyboardInterrupt:
                             sys.exit()
                             pass

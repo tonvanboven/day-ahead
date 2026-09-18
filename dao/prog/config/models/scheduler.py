@@ -65,6 +65,19 @@ class SchedulerConfig(BaseModel):
             "x-order": 1,
         },
     )
+    start_early_seconds: int = Field(
+        default=10,
+        ge=0,
+        le=59,
+        alias="start early seconds",
+        description="Seconds before the scheduled minute to start tasks",
+        json_schema_extra={
+            "x-help": "Start scheduled tasks this many seconds before the configured minute so subprocess initialization can finish at the interval boundary.",
+            "x-ui-section": "Scheduler",
+            "x-unit": "seconds",
+            "x-validation-hint": "Must be between 0 and 59 seconds",
+        },
+    )
     schedule: list[ScheduleEntry] = Field(
         default_factory=list,
         description="Scheduled task entries",
@@ -75,6 +88,7 @@ class SchedulerConfig(BaseModel):
         },
     )
     model_config = ConfigDict(
+        populate_by_name=True,
         json_schema_extra={
             "x-ui-group": "DAO",
             "x-order": 18,

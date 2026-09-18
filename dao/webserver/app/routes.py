@@ -1,6 +1,7 @@
 import collections
 import datetime
 import re
+import sys
 import time
 
 # from sqlalchemy.sql.coercions import expect_col_expression_collection
@@ -238,44 +239,44 @@ else:
 bewerkingen = {
     "calc_met_debug": {
         "name": "Optimaliseringsberekening met debug",
-        "cmd": ["python3", "../prog/day_ahead.py", "debug", "calc"],
+        "cmd": [sys.executable, "../prog/day_ahead.py", "debug", "calc"],
         "task": "calc_optimum",
         "file_name": "calc_debug",
     },
     "calc_zonder_debug": {
         "name": "Optimaliseringsberekening zonder debug",
-        "cmd": ["python3", "../prog/day_ahead.py", "calc"],
+        "cmd": [sys.executable, "../prog/day_ahead.py", "calc"],
         "task": "calc_optimum",
         "file_name": "calc",
     },
     "get_tibber": {
         "name": "Verbruiksgegevens bij Tibber ophalen",
-        "cmd": ["python3", "../prog/day_ahead.py", "tibber"],
+        "cmd": [sys.executable, "../prog/day_ahead.py", "tibber"],
         "task": "get_tibber_data",
         "file_name": "tibber",
     },
     "get_meteo": {
         "name": "Meteoprognoses ophalen",
-        "cmd": ["python3", "../prog/day_ahead.py", "meteo"],
+        "cmd": [sys.executable, "../prog/day_ahead.py", "meteo"],
         "task": "get_meteo_data",
         "file_name": "meteo",
     },
     "get_prices": {
         "name": "Day ahead prijzen ophalen",
-        "cmd": ["python3", "../prog/day_ahead.py", "prices"],
+        "cmd": [sys.executable, "../prog/day_ahead.py", "prices"],
         "task": "get_day_ahead_prices",
         "parameters": ["prijzen_start", "prijzen_tot"],
         "file_name": "prices",
     },
     "calc_baseloads": {
         "name": "Bereken de baseloads",
-        "cmd": ["python3", "../prog/day_ahead.py", "calc_baseloads"],
+        "cmd": [sys.executable, "../prog/day_ahead.py", "calc_baseloads"],
         "task": "calc_baseloads",
         "file_name": "baseloads",
     },
     "train_ml_predictions": {
         "name": "ML modellen trainen",
-        "cmd": ["python3", "../prog/day_ahead.py", "train"],
+        "cmd": [sys.executable, "../prog/day_ahead.py", "train"],
         "function": "train_ml_predictions",
         "file_name": "train",
     },

@@ -1,4 +1,4 @@
-import time, os, fnmatch, re, datetime, time, threading, json
+import time, os, fnmatch, re, datetime, time, threading, json, sys
 from flask import Blueprint, render_template, request, redirect, url_for
 
 from dao.prog.version import __version__
@@ -361,12 +361,12 @@ def task_exec():
     }
     save_task_state(state)
 
-    cmd = ["python3", "../prog/day_ahead.py", *cmd]
+    cmd = [sys.executable, "../prog/day_ahead.py", *cmd]
 
     threading.Thread(
         target=run_and_log,
         args=(cmd, state),
-        daemon=True
+        daemon=True,
     ).start()
 
     return redirect(url_for('v2.task_state'))

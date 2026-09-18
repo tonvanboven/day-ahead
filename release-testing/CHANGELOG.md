@@ -1,5 +1,23 @@
 # Changelog 刀 DAO
 # Day Ahead Optimizer
+# 2026.9.1.rc5
+- Restored isolated scheduler task execution so task failures do not crash the scheduler.
+- Added configurable `start early seconds` timing, defaulting to 10 seconds before each scheduled minute.
+- To enable Dashboard UI V2, set `dashboard -> ui version` to `"v2"` in `options.json`.
+
+# 2026.9.1.rc4
+- Restored isolated scheduler task execution with configurable early start timing.
+- Moved `preload_next_interval_controls` from `grid` to the applicable `battery` configuration.
+
+# 2026.9.1.rc3
+- Fixed configurable UI routing for the testing release.
+
+# 2026.9.1.rc2
+- Added configurable default UI version support.
+
+# 2026.9.1.rc1
+- Prepared the 2026.9.1 testing release with the scheduler and ARM64 fixes from the stable release.
+
 # 2026.9.0.rc5
 - Combined the HA dashboard JSON API changes with configurable graph colors for integrated testing
 

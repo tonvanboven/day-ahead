@@ -2569,6 +2569,18 @@
           "x-order": 1,
           "x-ui-section": "Scheduler"
         },
+        "start early seconds": {
+          "default": 10,
+          "description": "Seconds before the scheduled minute to start tasks",
+          "maximum": 59,
+          "minimum": 0,
+          "title": "Start Early Seconds",
+          "type": "integer",
+          "x-help": "Start scheduled tasks this many seconds before the configured minute so subprocess initialization can finish at the interval boundary.",
+          "x-ui-section": "Scheduler",
+          "x-unit": "seconds",
+          "x-validation-hint": "Must be between 0 and 59 seconds"
+        },
         "schedule": {
           "description": "Scheduled task entries",
           "items": {

@@ -1732,6 +1732,7 @@ Define when automatic tasks run using time patterns.
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `active` | boolean | No | `true` | Enable or disable the scheduler |
+| `start early seconds` | integer | No | `10` | Seconds before the scheduled minute to start tasks (Unit: `seconds`) _Must be between 0 and 59 seconds_ |
 | `schedule` | list[[ScheduleEntry](#scheduleentry)] | No | `null` | Scheduled task entries |
 
 <details>
@@ -1740,6 +1741,10 @@ Define when automatic tasks run using time patterns.
 **`active`**
 
 When enabled, scheduled tasks will run automatically at configured times. Disable to prevent all scheduled tasks from running.
+
+**`start early seconds`**
+
+Start scheduled tasks this many seconds before the configured minute so subprocess initialization can finish at the interval boundary.
 
 **`schedule`**
 

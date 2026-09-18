@@ -551,6 +551,7 @@
   },
   "scheduler": {
     "active": true,
+    "start early seconds": 10,
     "schedule": [
       {
         "time": "0544",
