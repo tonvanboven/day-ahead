@@ -271,6 +271,15 @@
           "x-ui-widget-filter": "number,input_number",
           "title": "Entity Set Power Feedin"
         },
+        "preload next interval controls": {
+          "default": false,
+          "description": "Restore cached battery and EV controls at the start of the next interval",
+          "title": "Preload Next Interval Controls",
+          "type": "boolean",
+          "x-help": "Optional: apply cached battery feed-in values, battery operating mode, and EV charging amperes at the exact start of the next interval before a new optimization finishes.",
+          "x-ui-section": "Power Configuration",
+          "x-ui-widget-filter": "switch"
+        },
         "entity set operating mode": {
           "anyOf": [
             {
@@ -701,6 +710,17 @@
       "additionalProperties": true,
       "description": "Dashboard web UI configuration.",
       "properties": {
+        "ui version": {
+          "default": "v1",
+          "description": "Default web UI version",
+          "enum": [
+            "v1",
+            "v2"
+          ],
+          "title": "Ui Version",
+          "type": "string",
+          "x-help": "Choose the web UI that opens at the dashboard root URL. Missing values default to V1."
+        },
         "port": {
           "default": 5000,
           "description": "Web UI port number",
@@ -1380,15 +1400,6 @@
           "x-help": "Optional: Home Assistant entity to save the average calculated power on the grid-point. Can be used for XOM-regulation.",
           "x-ui-section": "Power Configuration",
           "title": "Entity Grid Setpoint"
-        },
-        "preload next interval controls": {
-          "default": false,
-          "description": "Restore cached battery mode/feed-in and EV controls at the start of the next interval",
-          "title": "Preload Next Interval Controls",
-          "type": "boolean",
-          "x-help": "Optional: apply cached battery feed-in values, battery operating mode, and EV charging amperes at the exact start of the next interval before a new optimization finishes.",
-          "x-ui-section": "Power Configuration",
-          "x-ui-widget-filter": "switch"
         }
       },
       "title": "GridConfig",

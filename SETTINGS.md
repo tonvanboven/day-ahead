@@ -135,6 +135,7 @@ Configure your home battery storage system for optimal energy management and cos
 | `bat_to_dc max power` | [FlexFloat](#flexfloat) (optional) | No | `null` | Battery to DC max power in watts (Unit: `W`) _Must be > 0_ |
 | `cycle cost` | number | Yes | — | Cost per battery cycle in euros (Unit: `€`) _Must be >= 0, typically €0.50-€1.50 per cycle_ |
 | `entity set power feedin` | [EntityId](#entityid) (optional) | No | `null` | HA entity to set power feed-in to grid |
+| `preload next interval controls` | boolean | No | `false` | Restore cached battery and EV controls at the start of the next interval |
 | `entity set operating mode` | [EntityId](#entityid) (optional) | No | `null` | HA entity to set battery operating mode |
 | `entity set operating mode on` | string (optional) | No | `"Aan"` | Value for operating mode ON |
 | `entity set operating mode off` | string (optional) | No | `"Uit"` | Value for operating mode OFF |
@@ -232,6 +233,10 @@ Degradation cost per full charge-discharge cycle in euros. Used to factor batter
 **`entity set power feedin`**
 
 Optional: Home Assistant entity to control grid feed-in power. Used by scheduler to execute optimized battery operations.
+
+**`preload next interval controls`**
+
+Optional: apply cached battery feed-in values, battery operating mode, and EV charging amperes at the exact start of the next interval before a new optimization finishes.
 
 **`entity set operating mode`**
 
@@ -408,7 +413,6 @@ Optimizer ensures combined consumption never exceeds this limit:
 | `max_power` | number | No | `17` | Maximum grid power in kW (Unit: `kW`) _Must be > 0, typical 7-25 kW for residential_ |
 | `entity balance switch` | [EntityId](#entityid) (optional) | No | `null` | HA entity for grid balancing switch |
 | `entity grid setpoint` | [EntityId](#entityid) (optional) | No | `null` | HA entity for the grid setpoint |
-| `preload next interval controls` | boolean | No | `false` | Restore cached battery mode/feed-in and EV controls at the start of the next interval |
 
 <details>
 <summary><b>📖 Field Details</b> (click to expand)</summary>
@@ -424,10 +428,6 @@ Optional: Home Assistant entity to enable/disable grid balancing mode. Used for 
 **`entity grid setpoint`**
 
 Optional: Home Assistant entity to save the average calculated power on the grid-point. Can be used for XOM-regulation.
-
-**`preload next interval controls`**
-
-Optional: apply cached battery feed-in values, battery operating mode, and EV charging amperes at the exact start of the next interval before a new optimization finishes.
 
 </details>
 
@@ -1134,10 +1134,15 @@ Access dashboard at:
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
+| `ui version` | string | No | `"v1"` | Default web UI version. Options: `v1`, `v2` |
 | `port` | integer | No | `5000` | Web UI port number (Unit: `port`) _1024-65535, default 5000_ |
 
 <details>
 <summary><b>📖 Field Details</b> (click to expand)</summary>
+
+**`ui version`**
+
+Choose the web UI that opens at the dashboard root URL. Missing values default to V1.
 
 **`port`**
 
