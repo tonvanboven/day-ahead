@@ -1,5 +1,11 @@
 # Changelog 刀 DAO
 # Day Ahead Optimizer
+# 2026.9.1.1
+- Added configurable scheduler early start timing to start isolated tasks before the scheduled interval.
+- Added configurable Dashboard UI V2 selection.
+- Moved `preload_next_interval_controls` from `grid` to the applicable `battery` configuration.
+- Ensured manually started tasks use the active Python environment and retain task logs/status correctly.
+
 # 2026.9.1
 - removed us of pipe, let the child inherit the scheduler's stdout/stderr: (#812)
 - added git and nano to the installed packages
