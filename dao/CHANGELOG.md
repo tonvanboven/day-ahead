@@ -1,5 +1,8 @@
 # Changelog 刀 DAO
 # Day Ahead Optimizer
+# 2026.9.1.2
+- Prevented the scheduler from repeatedly logging and processing the same interval when the early-start time has already passed.
+
 # 2026.9.1.1
 - Added configurable scheduler early start timing to start isolated tasks before the scheduled interval.
 - Added configurable Dashboard UI V2 selection.

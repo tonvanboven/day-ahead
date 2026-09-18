@@ -41,14 +41,16 @@ class DaScheduler(DaBase):
             start_at = next_min - datetime.timedelta(
                 seconds=self.start_early_seconds
             )
+            wait_until = max(start_at, next_min) if start_at <= t else start_at
             logging.info(
-                "Scheduler timing: now=%s, scheduled=%s, start_at=%s, early_seconds=%s",
+                "Scheduler timing: now=%s, scheduled=%s, start_at=%s, wait_until=%s, early_seconds=%s",
                 t.strftime("%Y-%m-%d %H:%M:%S"),
                 next_min.strftime("%Y-%m-%d %H:%M:%S"),
                 start_at.strftime("%Y-%m-%d %H:%M:%S"),
+                wait_until.strftime("%Y-%m-%d %H:%M:%S"),
                 self.start_early_seconds,
             )
-            time.sleep(max(0, (start_at - t).total_seconds()))
+            time.sleep(max(0, (wait_until - t).total_seconds()))
             if not self.active:
                 continue
             hour = next_min.hour
