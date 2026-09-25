@@ -4178,7 +4178,7 @@ class DaCalc(DaBase):
                     ev_controls,
                 )
                 logging.info(
-                    "Precomputed controls cached for %s | batteries=[%s] | ev=[%s]",
+                    "Vooraf berekende regelingen opgeslagen voor %s | batterijen=[%s] | EV=[%s]",
                     next_interval_dt.strftime("%Y-%m-%d %H:%M:%S"),
                     battery_summary,
                     ev_summary,
@@ -4705,7 +4705,7 @@ class DaCalc(DaBase):
                     )
                 )
                 logging.info(
-                    "Final cache state for next %s %s | batteries: %s | ev: %s",
+                    "Eindstatus van de cache voor het volgende %s vanaf %s | batterijen: %s | EV: %s",
                     self.interval_name,
                     next_interval_cache_payload["interval_start"],
                     battery_summary,

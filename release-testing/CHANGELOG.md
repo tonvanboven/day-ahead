@@ -1,5 +1,10 @@
 # Changelog 刀 DAO
 # Day Ahead Optimizer
+# 2026.9.1.rc6
+- Kept Next, +6h, and Last chart navigation available while recalculating forward navigation from the current file list.
+- Avoided restarting DAO when config or secrets JSON content is unchanged.
+- Clarified cache and task log messages and renamed the Run page to Tasks.
+
 # 2026.9.1.rc5
 - Restored isolated scheduler task execution so task failures do not crash the scheduler.
 - Added configurable `start early seconds` timing, defaulting to 10 seconds before each scheduled minute.

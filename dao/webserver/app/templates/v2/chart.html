@@ -32,15 +32,15 @@
         </form>
     </div>
     <div class="btn-group col-8 col-sm-4 col-lg-3  col-xl-2">
-        <a class="btn btn-outline-secondary {{ 'disabled' if show_index == last_index  else '' }}"
-           href="{{url_for('v2.chart', i=next_index)}}">
+          <a class="btn btn-outline-secondary"
+              href="{{url_for('v2.chart', action='next', ts=show_ts)}}">
             Next
         </a>
-        <a class="btn btn-outline-secondary {{ 'disabled' if ffnext_index >= last_index - 1  else '' }}"
-           href="{{url_for('v2.chart', i=ffnext_index)}}">
+          <a class="btn btn-outline-secondary"
+              href="{{url_for('v2.chart', action='next6h', ts=show_ts)}}">
             +6h
         </a>
-        <a class="btn btn-outline-secondary {{ 'disabled' if show_index >= last_index - 1 else ''}}"
+          <a class="btn btn-outline-secondary"
            href="{{url_for('v2.chart')}}">
             Last
         </a>

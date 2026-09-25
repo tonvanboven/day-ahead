@@ -135,6 +135,25 @@ def get_task_state() -> dict:
 
     return state
 
+
+def save_json_if_changed(path: str, content: str) -> bool:
+    new_data = json.loads(content)
+    file_missing = object()
+
+    try:
+        with open(path, "r", encoding="utf-8") as file:
+            current_data = json.load(file)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        current_data = file_missing
+
+    if current_data is not file_missing and current_data == new_data:
+        return False
+
+    with open(path, "w", encoding="utf-8") as file:
+        file.write(content)
+
+    return True
+
 def run_and_log(cmd, state):
     flist = get_file_list_with_ts(os.path.join(app_datapath, "log"),"*.log",)
 
@@ -223,13 +242,22 @@ def log_chart(datapath: str, pattern: str):
     if rq_ts is not None:
         show_index = get_closest_index_from_list(flist, datetime.datetime.fromisoformat(rq_ts).timestamp())
 
+    action = request.args.get("action")
+    if action == "next":
+        show_index = min(last_index, show_index + 1)
+    elif action == "next6h":
+        show_index = min(
+            last_index,
+            get_closest_index_from_list(
+                flist,
+                flist[show_index]["time"] + (6 * 3600),
+            ),
+        )
+
     first_index = 0
     prev_index = max(0, show_index - 1)
-    next_index = min(last_index, show_index + 1)
     ffprev_index = max(0,
                        get_closest_index_from_list(flist, flist[show_index]["time"] - (6 * 3600)))  # Subtract 6 hours
-    ffnext_index = min(last_index,
-                       get_closest_index_from_list(flist, flist[show_index]["time"] + (6 * 3600)))  # Add 6 hours
     show_ts = datetime.datetime.fromtimestamp(flist[show_index]["time"]).isoformat()
 
     return {
@@ -238,8 +266,6 @@ def log_chart(datapath: str, pattern: str):
         "ffprev_index": ffprev_index,
         "prev_index": prev_index,
         "show_index": show_index,
-        "next_index": next_index,
-        "ffnext_index": ffnext_index,
         "last_index": last_index,
         "show_ts": show_ts,
     }
@@ -636,11 +662,10 @@ def config():
     if request.method == "POST" and request.form.to_dict()["config"] is not None:
         try:
             newconfig = request.form.to_dict()["config"]
-            # try loading json
-            json.loads(newconfig)
-            with open(path, "w") as f:
-                f.write(newconfig)
-            success = "Config updated successfully"
+            if save_json_if_changed(path, newconfig):
+                success = "Config updated successfully. Please wait while DAO reboots."
+            else:
+                success = "No changes detected. DAO was not restarted."
         except Exception as err:
             error = "Error: " + err.args[0]
 
@@ -664,11 +689,10 @@ def secrets():
     if request.method == "POST" and request.form.to_dict()["secrets"] is not None:
         try:
             newsecrets = request.form.to_dict()["secrets"]
-            # try loading json
-            json.loads(newsecrets)
-            with open(path, "w") as f:
-                f.write(newsecrets)
-            success = "Secrets updated successfully"
+            if save_json_if_changed(path, newsecrets):
+                success = "Secrets updated successfully. Please wait while DAO reboots."
+            else:
+                success = "No changes detected. DAO was not restarted."
         except Exception as err:
             error = "Error: " + err.args[0]
 
