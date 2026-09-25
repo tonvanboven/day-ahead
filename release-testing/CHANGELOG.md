@@ -1,5 +1,9 @@
 # Changelog 刀 DAO
 # Day Ahead Optimizer
+# 2026.9.1.rc8
+- Moved periodic scheduler timing diagnostics to DEBUG so INFO logs are not filled every minute.
+- Prevented the same early-start schedule slot from being processed again at the exact minute.
+
 # 2026.9.1.rc7
 - Prevented scheduler timing logs from repeating before the scheduled interval.
 - Prevented the NixOS code sync from overwriting runtime options and secrets by default.

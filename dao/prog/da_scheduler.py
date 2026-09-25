@@ -43,7 +43,7 @@ class DaScheduler(DaBase):
             )
             wait_until = max(start_at, next_min) if start_at <= t else start_at
             time.sleep(max(0, (wait_until - t).total_seconds()))
-            logging.info(
+            logging.debug(
                 "Scheduler timing: now=%s, scheduled=%s, start_at=%s, wait_until=%s, early_seconds=%s",
                 t.strftime("%Y-%m-%d %H:%M:%S"),
                 next_min.strftime("%Y-%m-%d %H:%M:%S"),
@@ -51,35 +51,37 @@ class DaScheduler(DaBase):
                 wait_until.strftime("%Y-%m-%d %H:%M:%S"),
                 self.start_early_seconds,
             )
-            if not self.active:
-                continue
-            hour = next_min.hour
-            minute = next_min.minute
-            key0 = str(hour).zfill(2) + str(minute).zfill(2)
-            # ieder uur in dezelfde minuut voorbeeld xx15
-            key1 = "xx" + str(minute).zfill(2)
-            # iedere minuut in een uur voorbeeld 02xx
-            key2 = str(hour).zfill(2) + "xx"
-            tasks = []
-            for key in self.scheduler_tasks:
-                if key == key0:
-                    tasks.append(self.scheduler_tasks[key])
-                elif key == key1:
-                    tasks.append(self.scheduler_tasks[key])
-                elif key == key2:
-                    tasks.append(self.scheduler_tasks[key])
-            for task in tasks:
-                for key_task in self.tasks:
-                    if self.tasks[key_task]["function"] == task:
-                        try:
-                            self.run_task_process(key_task)
-                        except KeyboardInterrupt:
-                            sys.exit()
-                            pass
-                        except Exception as e:
-                            print(e)
-                            continue
-                        break
+            if self.active:
+                hour = next_min.hour
+                minute = next_min.minute
+                key0 = str(hour).zfill(2) + str(minute).zfill(2)
+                # ieder uur in dezelfde minuut voorbeeld xx15
+                key1 = "xx" + str(minute).zfill(2)
+                # iedere minuut in een uur voorbeeld 02xx
+                key2 = str(hour).zfill(2) + "xx"
+                tasks = []
+                for key in self.scheduler_tasks:
+                    if key == key0:
+                        tasks.append(self.scheduler_tasks[key])
+                    elif key == key1:
+                        tasks.append(self.scheduler_tasks[key])
+                    elif key == key2:
+                        tasks.append(self.scheduler_tasks[key])
+                for task in tasks:
+                    for key_task in self.tasks:
+                        if self.tasks[key_task]["function"] == task:
+                            try:
+                                self.run_task_process(key_task)
+                            except KeyboardInterrupt:
+                                sys.exit()
+                                pass
+                            except Exception as e:
+                                print(e)
+                                continue
+                            break
+
+            # Do not process the same scheduled minute again after an early start.
+            time.sleep(max(0, (next_min - datetime.datetime.now()).total_seconds()))
 
 
 def main():
