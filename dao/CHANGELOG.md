@@ -1,5 +1,9 @@
 # Changelog 刀 DAO
 # Day Ahead Optimizer
+# 2026.9.1.3
+- Reduced scheduler log volume by moving periodic timing diagnostics to DEBUG.
+- Prevented the same early-start schedule slot from being processed again at the exact minute.
+
 # 2026.9.1.2
 - Prevented the scheduler from repeatedly logging and processing the same interval when the early-start time has already passed.
 
