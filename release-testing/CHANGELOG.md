@@ -1,5 +1,9 @@
 # Changelog 刀 DAO
 # Day Ahead Optimizer
+# 2026.9.1.rc7
+- Prevented scheduler timing logs from repeating before the scheduled interval.
+- Prevented the NixOS code sync from overwriting runtime options and secrets by default.
+
 # 2026.9.1.rc6
 - Kept Next, +6h, and Last chart navigation available while recalculating forward navigation from the current file list.
 - Avoided restarting DAO when config or secrets JSON content is unchanged.
