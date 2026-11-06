@@ -2,8 +2,10 @@
 Heating system / heat pump configuration models.
 """
 
-from typing import Annotated, Literal, Optional, Union
-from pydantic import BaseModel, Field, model_validator, ConfigDict
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
 from ..base import EntityId, FlexFloat
 
 
@@ -35,11 +37,56 @@ class HeatingStage(BaseModel):
     model_config = ConfigDict(
         extra="allow",
         populate_by_name=True,
+        loc_by_alias=False,
         json_schema_extra={
             "x-help": "Define heat pump performance curve by power stages and corresponding COP values. Multiple stages allow accurate modeling of variable-speed compressors.",
             "x-ui-section": "General",
         },
     )
+
+
+class CopTemperaturePoint(BaseModel):
+    """Point of the COP temperature curve: a COP factor at an outdoor temperature."""
+
+    temperature: float = Field(
+        description="Outdoor temperature in °C",
+        json_schema_extra={
+            "x-help": "Outdoor temperature in °C at which the factor applies.",
+            "x-unit": "°C",
+            "x-ui-section": "General",
+        },
+    )
+    factor: float = Field(
+        gt=0,
+        description="COP factor at this outdoor temperature",
+        json_schema_extra={
+            "x-help": "Factor applied to every stage COP at this outdoor temperature. "
+            "1.0 at the temperature the stage COPs are given for (e.g. 7 °C, the A7 rating point).",
+            "x-unit": "factor",
+            "x-ui-section": "General",
+            "x-validation-hint": "Must be > 0",
+        },
+    )
+
+    model_config = ConfigDict(populate_by_name=True, loc_by_alias=False)
+
+
+def cop_temperature_factor(
+    curve: list["CopTemperaturePoint"], temperature: float
+) -> float:
+    """COP factor at an outdoor temperature: linear between the curve points,
+    the nearest end point's factor outside them, 1.0 without a curve."""
+    if not curve:
+        return 1.0
+    if temperature <= curve[0].temperature:
+        return curve[0].factor
+    for lo, hi in zip(curve, curve[1:], strict=False):
+        if temperature <= hi.temperature:
+            fraction = (temperature - lo.temperature) / (
+                hi.temperature - lo.temperature
+            )
+            return lo.factor + fraction * (hi.factor - lo.factor)
+    return curve[-1].factor
 
 
 class HeatingDisabled(BaseModel):
@@ -58,6 +105,7 @@ class HeatingDisabled(BaseModel):
     model_config = ConfigDict(
         extra="allow",
         populate_by_name=True,
+        loc_by_alias=False,
         json_schema_extra={
             "x-ui-group": "Heating",
             "x-icon": "heat-pump",
@@ -78,7 +126,7 @@ class HeatingEnabled(BaseModel):
             "x-ui-section": "General",
         },
     )
-    entity_hp_enabled: Optional[EntityId] = Field(
+    entity_hp_enabled: EntityId | None = Field(
         default=None,
         alias="entity hp enabled",
         description="HA binary sensor for heat pump enabled status",
@@ -97,6 +145,22 @@ class HeatingEnabled(BaseModel):
             "x-unit": "factor",
             "x-ui-section": "Configuration",
             "x-validation-hint": "Must be > 0, typically 0.5-10.0",
+        },
+    )
+    degree_days_base_temperature: float = Field(
+        default=16.0,
+        ge=0.0,
+        le=30.0,
+        description="Base temperature (heating limit) for degree days",
+        json_schema_extra={
+            "x-help": "Average daily outdoor temperature in °C at and above which no heating is needed (the heating limit). "
+            "Heat demand is calculated from the degree days below this temperature: "
+            "(base temperature - average outdoor temperature) per day. "
+            "Raise it if your heating starts at a higher outdoor temperature, lower it for a well-insulated house. "
+            "Default: 16 °C.",
+            "x-unit": "°C",
+            "x-ui-section": "Configuration",
+            "x-validation-hint": "Between 0 and 30, typically 15-18",
         },
     )
     adjustment: Literal["on/off", "power", "heating curve"] = Field(
@@ -120,7 +184,22 @@ class HeatingEnabled(BaseModel):
             "x-validation-hint": "Required for 'power' and 'heating curve' adjustment; must be sorted by max_power",
         },
     )
-    entity_adjust_heating_curve: Optional[EntityId] = Field(
+    cop_temperature_curve: list[CopTemperaturePoint] = Field(
+        default=[],
+        description="COP factor per outdoor temperature",
+        json_schema_extra={
+            "x-help": "Optional: how the COP changes with the outdoor temperature. "
+            "Each point gives a factor on all stage COPs at an outdoor temperature; "
+            "between points the factor is interpolated linearly, outside them the nearest point's factor is used. "
+            "The stage COPs are then the COPs at the temperature where the factor is 1.0 (e.g. 7 °C). "
+            "For every interval the factor at the forecast temperature (meteo) is used, "
+            "so the heat pump is planned in the warmer hours when the higher COP outweighs the price. "
+            "Empty: the stage COPs are used for every temperature.",
+            "x-ui-section": "Power Stages",
+            "x-validation-hint": "Sorted by temperature (ascending), factors > 0",
+        },
+    )
+    entity_adjust_heating_curve: EntityId | None = Field(
         default=None,
         alias="entity adjust heating curve",
         description="HA entity to adjust heating curve",
@@ -130,7 +209,7 @@ class HeatingEnabled(BaseModel):
             "x-ui-widget-filter": "number,input_number",
         },
     )
-    adjustment_factor: Optional[float] = Field(
+    adjustment_factor: float | None = Field(
         default=None,
         alias="adjustment factor",
         description="Factor for heating curve adjustment",
@@ -153,7 +232,7 @@ class HeatingEnabled(BaseModel):
             "x-validation-hint": "Must be >= 1, typically 2-4 for 1h intervals",
         },
     )
-    entity_heat_produced: Optional[EntityId] = Field(
+    entity_heat_produced: EntityId | None = Field(
         default=None,
         alias="entity hp heat produced",
         description="HA entity for heat produced",
@@ -164,7 +243,7 @@ class HeatingEnabled(BaseModel):
             "x-ui-widget-filter": "sensor",
         },
     )
-    entity_hp_heat_demand: Optional[EntityId] = Field(
+    entity_hp_heat_demand: EntityId | None = Field(
         default=None,
         alias="entity hp heat demand",
         description="HA entity for heat demand",
@@ -175,7 +254,7 @@ class HeatingEnabled(BaseModel):
             "x-ui-widget-filter": "sensor",
         },
     )
-    entity_avg_outside_temp: Optional[EntityId] = Field(
+    entity_avg_outside_temp: EntityId | None = Field(
         default=None,
         alias="entity avg outside temp",
         description="HA entity for average temperature",
@@ -186,7 +265,7 @@ class HeatingEnabled(BaseModel):
             "x-ui-widget-filter": "sensor",
         },
     )
-    entity_hp_cop: Optional[EntityId] = Field(
+    entity_hp_cop: EntityId | None = Field(
         default=None,
         alias="entity hp cop",
         description="HA entity for heat pump COP",
@@ -197,7 +276,7 @@ class HeatingEnabled(BaseModel):
             "x-ui-widget-filter": "sensor",
         },
     )
-    entity_hp_power: Optional[EntityId] = Field(
+    entity_hp_power: EntityId | None = Field(
         default=None,
         alias="entity hp power",
         description="HA entity for heat pump power",
@@ -208,7 +287,7 @@ class HeatingEnabled(BaseModel):
             "x-ui-widget-filter": "sensor",
         },
     )
-    entity_hp_switch: Optional[EntityId] = Field(
+    entity_hp_switch: EntityId | None = Field(
         default=None,
         alias="entity hp switch",
         description="HA entity to control heat pump on/off",
@@ -222,6 +301,7 @@ class HeatingEnabled(BaseModel):
     model_config = ConfigDict(
         extra="allow",
         populate_by_name=True,
+        loc_by_alias=False,
         json_schema_extra={
             "title": "HeatingConfig",
             "x-ui-group": "Heating",
@@ -263,7 +343,15 @@ Define power levels and corresponding COP values:
 
     @model_validator(mode="after")
     def validate_stages(self) -> "HeatingEnabled":
-        """Validate stages: required for 'power' adjustment, must be sorted, and get a zero-power sentinel."""
+        """Validate stages: required for 'power' adjustment, must be sorted, and get a zero-power sentinel.
+        The COP temperature curve must be sorted by temperature."""
+        temperatures = [point.temperature for point in self.cop_temperature_curve]
+        if len(set(temperatures)) != len(temperatures) or temperatures != sorted(
+            temperatures
+        ):
+            raise ValueError(
+                "cop_temperature_curve must be sorted by temperature (ascending), without duplicates"
+            )
         if len(self.stages) == 0:
             if self.adjustment in ("power", "heating curve"):
                 raise ValueError(
@@ -283,6 +371,6 @@ Define power levels and corresponding COP values:
 # Discriminated union: routes on heater_present (Literal[True] → HeatingEnabled,
 # Literal[False] → HeatingDisabled). Pydantic generates oneOf + const in JSON Schema.
 HeatingConfig = Annotated[
-    Union[HeatingEnabled, HeatingDisabled],
+    HeatingEnabled | HeatingDisabled,
     Field(discriminator="heater_present"),
 ]

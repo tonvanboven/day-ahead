@@ -1,11 +1,29 @@
-import time, os, fnmatch, re, datetime, time, threading, json, sys
-from flask import Blueprint, render_template, request, redirect, url_for
-
-from dao.prog.version import __version__
-from subprocess import Popen, PIPE, run, STDOUT, DEVNULL
+import datetime
+import fnmatch
+import json
+import os
+import re
+import sys
+import threading
+import time
 from pathlib import Path
-from dao.prog.da_report import Report
+from subprocess import DEVNULL, Popen
+
+from flask import (
+    Blueprint,
+    abort,
+    has_request_context,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
+from sqlalchemy import Table
+from werkzeug.security import safe_join
+
 from dao.prog.config.loader import ConfigurationLoader
+from dao.prog.da_report import Report
+from dao.prog.version import __version__
 
 v2 = Blueprint("v2", __name__)
 
@@ -17,15 +35,40 @@ def inject_data():
     }
 
 # globals
-app_datapath = "app/static/data/"
+app_datapath = os.environ.get("DAO_WEB_DATA_DIR", "app/static/data").rstrip("/") + "/"
 
-VITE_DEV_SERVER = "http://localhost:5173"
+VITE_DEV_PORT = os.getenv("VITE_DEV_PORT", "5173")
 VITE_MANIFEST = Path("app/static/build/.vite/manifest.json")
+
+def vite_dev_server() -> str:
+    """
+    Base URL of the Vite dev server as seen by the browser.
+
+    Set VITE_DEV_SERVER to pin it explicitly (for example, when the dev server sits
+    behind a proxy or a tunnel on a different port).  Otherwise, it is derived from
+    the host the page itself was requested on, so the assets are loaded from the
+    same machine that serves the application instead of from a hardcoded
+    "localhost", which would resolve to the browser's own machine.
+    """
+    pinned = os.getenv("VITE_DEV_SERVER")
+    if pinned:
+        return pinned.rstrip("/")
+    if has_request_context():
+        # request.host includes the port; strip it, keep the (possibly IPv6) host.
+        host = request.host
+        if host.startswith("["):  # [::1]:5000
+            host = host[: host.index("]") + 1]
+        elif ":" in host:
+            host = host.rsplit(":", 1)[0]
+        # Protocol relative, so the scheme follows the page itself.
+        return f"//{host}:{VITE_DEV_PORT}"
+    return f"http://localhost:{VITE_DEV_PORT}"
 
 def vite_tags(entry: str) -> str:
     if os.getenv("VITE_DEV") == "1":
-        return f'<script type="module" src="{VITE_DEV_SERVER}/@vite/client"></script>' \
-               f'<script type="module" src="{VITE_DEV_SERVER}/{entry}"></script>'
+        dev_server = vite_dev_server()
+        return f'<script type="module" src="{dev_server}/@vite/client"></script>' \
+               f'<script type="module" src="{dev_server}/{entry}"></script>'
 
     if not VITE_MANIFEST.exists():
         raise RuntimeError("Vite manifest not found. Run 'npm run build' in the Vite server directory.")
@@ -118,7 +161,7 @@ def get_task_state() -> dict:
     }
 
     try:
-        with open(STATEFILE, "r", encoding="utf-8") as f:
+        with open(STATEFILE, encoding="utf-8") as f:
             state = json.load(f)
     except FileNotFoundError:
         return no_state
@@ -141,7 +184,7 @@ def save_json_if_changed(path: str, content: str) -> bool:
     file_missing = object()
 
     try:
-        with open(path, "r", encoding="utf-8") as file:
+        with open(path, encoding="utf-8") as file:
             current_data = json.load(file)
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         current_data = file_missing
@@ -170,6 +213,8 @@ def run_and_log(cmd, state):
     )
 
     while proc.poll() is None:
+        time.sleep(1)
+
         updated_state = get_task_state()
 
         if updated_state.get("status") == "cancelled":
@@ -208,8 +253,6 @@ def run_and_log(cmd, state):
 
         if state["status"] == "running":
             save_task_state(state)
-
-        time.sleep(1)
 
     proc.wait()
 
@@ -298,7 +341,7 @@ def get_solar_items_with_ml():
 def chart():
     kwargs = log_chart("images/", "*.png")
     if kwargs is None:
-        return render_template("v2/no-tasks.html", )
+        return render_template("v2/no-task.html", )
 
     kwargs["image"] = url_for('static', filename="data/images/" + kwargs["filename"])
     return render_template(
@@ -311,10 +354,10 @@ def chart():
 def log():
     kwargs = log_chart("log/", "*.log")
     if kwargs is None:
-        return render_template("v2/no-tasks.html", )
+        return render_template("v2/no-task.html", )
 
     log_file = app_datapath + "log/" + kwargs["filename"]
-    with open(log_file, "r") as f:
+    with open(log_file) as f:
         kwargs["logdata"] = f.read()
 
     return render_template(
@@ -335,7 +378,15 @@ def delete_file():
 
 @v2.route("/tasks")
 def tasks():
-    return render_template("v2/tasks.html")
+    from dao.prog.da_const import tasks
+
+    ui_tasks = {
+        name: task
+        for name, task in tasks.items()
+        if task.get("ui_enabled") is not False
+    }
+
+    return render_template("v2/tasks.html", tasks=ui_tasks)
 
 @v2.route("/task-cancel")
 def task_cancel():
@@ -343,51 +394,40 @@ def task_cancel():
         state = get_task_state()
         state["status"] = "cancelled"
         save_task_state(state)
-        return render_template("v2/tasks.html")
+        return redirect(url_for('v2.task_state'))
     except Exception:
         return "Error cancelling task", 500
 
 
 @v2.route("/task-exec", methods=["POST"])
 def task_exec():
+    from dao.prog.da_const import tasks
     current_state = get_task_state()
 
     if current_state["status"] == "running":
         return "Process already running: " + current_state["task"], 500
 
-    task = request.form.to_dict()["task"]
+    task_name = request.form.to_dict()["task"]
 
-    cmd = None
-    match task:
-        case "optimize_debug":
-            cmd = ["debug", "calc"]
-        case "optimize_regular":
-            cmd = ["calc"]
-        case "calc_baseloads":
-            cmd = ["calc_baseloads"]
-        case "update_tibber":
-            cmd = ["tibber"]
-        case "update_meteo":
-            cmd = ["meteo"]
-        case "update_prices":
-            cmd = ["prices"]
-        case "train_ml":
-            cmd = ["train"]
-
-    if cmd is None:
-        return "Invalid action", 500
+    if task_name not in tasks:
+        return "Invalid task", 500
 
     # Save the state synchronous to prevent race condition
     state = {
         "status": "running",
         "started": time.time(),
-        "task": task,
+        "task": task_name,
         "returncode": None,
         "logfile": None,
     }
     save_task_state(state)
 
-    cmd = [sys.executable, "../prog/day_ahead.py", *cmd]
+    cmd = tasks[task_name]["cmd"].copy()
+    cmd[0] = sys.executable
+    cmd[1] = "../prog/day_ahead.py"
+
+    if task_name == "get_day_ahead_prices":
+        cmd.append(datetime.date.today().strftime("%Y-%m-%d"))
 
     threading.Thread(
         target=run_and_log,
@@ -430,9 +470,9 @@ def task_state():
             content = "No log data available yet"
         else:
             try:
-                with open(current_state["logfile"], "r") as f:
+                with open(current_state["logfile"]) as f:
                     content = f.read()
-            except:
+            except (OSError, UnicodeError):
                 content = "Could not read logfile"
 
     headers = {
@@ -471,7 +511,7 @@ def reports_gen(subject: str, view: str, period: str, solar_item=None, date: dat
             report_df, interval, view
         )
     elif subject == "balans":
-        report_df, lastmoment = report.get_energy_balance_data(
+        report_df, _lastmoment = report.get_energy_balance_data(
             period, _tot=tot
         )
         report_df = report.calc_balance_columns(
@@ -620,7 +660,7 @@ def solar():
         date=date_str,
         subject_options=[
             {"label": key, "value": key}
-            for key in solar_items.keys()
+            for key in solar_items
         ]
     )
 
@@ -659,18 +699,33 @@ def config():
     error = None
     success = None
 
+    tmp_file = Path('/tmp/options_tmp.json')
+
     if request.method == "POST" and request.form.to_dict()["config"] is not None:
+        content = request.form.to_dict()["config"]
         try:
-            newconfig = request.form.to_dict()["config"]
-            if save_json_if_changed(path, newconfig):
+            json.loads(content)
+
+            with open(tmp_file, "w") as tmp_f:
+                tmp_f.write(content)
+
+            loader = ConfigurationLoader(tmp_file)
+            loader.load_and_validate()
+
+            if save_json_if_changed(path, content):
                 success = "Config updated successfully. Please wait while DAO reboots."
             else:
                 success = "No changes detected. DAO was not restarted."
         except Exception as err:
-            error = "Error: " + err.args[0]
+            error = f"Error: {err}"
 
-    with open(path, "r") as file:
-        content = file.read()
+            tmp_file.unlink(missing_ok=True)
+        else:
+            tmp_file.unlink(missing_ok=True)
+
+    else:
+        with open(path) as file:
+            content = file.read()
 
     return render_template(
         "v2/config.html",
@@ -687,20 +742,18 @@ def secrets():
     success = None
 
     if request.method == "POST" and request.form.to_dict()["secrets"] is not None:
+        content = request.form.to_dict()["secrets"]
         try:
-            newsecrets = request.form.to_dict()["secrets"]
-            if save_json_if_changed(path, newsecrets):
+            json.loads(content)
+            if save_json_if_changed(path, content):
                 success = "Secrets updated successfully. Please wait while DAO reboots."
             else:
                 success = "No changes detected. DAO was not restarted."
         except Exception as err:
-            error = "Error: " + err.args[0]
-
-    with open(path, "r") as file:
-        content = file.read()
-
-    with open(path, "r") as file:
-        content = file.read()
+            error = f"Error: {err}"
+    else:
+        with open(path) as file:
+            content = file.read()
 
     return render_template(
         "v2/secrets.html",
@@ -708,3 +761,80 @@ def secrets():
         success=success,
         error=error,
     )
+
+@v2.route("/view-file", methods=["GET", "POST"])
+def view_file():
+    filename = request.args.get("file")
+    if (
+        not filename
+        or "/" in filename
+        or "\\" in filename
+        or "\x00" in filename
+        or not filename.endswith(".log")
+    ):
+        abort(400)
+    log_dir = (Path(app_datapath) / "log").resolve()
+    safe_path = safe_join(str(log_dir), filename)
+    if safe_path is None:
+        abort(400)
+    try:
+        log_file = Path(safe_path).resolve()
+        if log_file.parent != log_dir:
+            abort(400)
+        content = log_file.read_text()
+    except (FileNotFoundError, IsADirectoryError):
+        abort(404)
+    except (OSError, RuntimeError):
+        abort(400)
+
+    return render_template(
+        "v2/view-file.html",
+        content=content,
+        filename=log_file,
+    )
+
+def _alter_hex(hex_color, factor):
+    """
+    factor < 1 = darker
+    """
+    hex_color = hex_color.lstrip("#")
+
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+
+    r = max(0, min(255, int(r * factor)))
+    g = max(0, min(255, int(g * factor)))
+    b = max(0, min(255, int(b * factor)))
+
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+def _datasets_config():
+    report = Report(app_datapath + "/options.json")
+    metadata = report.db_da.metadata
+    engine = report.db_da.engine
+
+    variabel = Table("variabel", metadata, autoload_with=engine)
+
+    with engine.connect() as conn:
+        vars = conn.execute(
+            variabel.select()
+        ).fetchall()
+
+    datasets = []
+
+    for row in vars:
+        color = "#ffffff"
+
+        datasets.append({
+            "label": row.name,
+            "code": row.code,
+            "borderColor": _alter_hex(color, 0.8),
+            "backgroundColor": color,
+            "type": "bar" if row.dim == "kWh" else "line",
+            "stepped": row.dim == "euro/kWh",
+            "yAxisID": f"y_{row.dim}",
+            "unit": row.dim,
+        })
+
+    return datasets

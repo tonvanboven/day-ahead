@@ -3,21 +3,13 @@ Scheduler configuration models.
 """
 
 from typing import Literal
-from pydantic import BaseModel, Field, ConfigDict, field_validator
 
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+
+from dao.prog.da_const import tasks
 
 # Valid scheduler actions
-SchedulerAction = Literal[
-    "get_meteo_data",
-    "get_tibber_data",
-    "get_day_ahead_prices",
-    "calc_optimum",
-    "calc_optimum_met_debug",
-    "clean_data",
-    "calc_baseloads",
-    "train_ml_predictions",
-]
-
+SchedulerAction = Literal[*tasks.keys()]
 
 class ScheduleEntry(BaseModel):
     """A single scheduled task entry."""
@@ -65,17 +57,17 @@ class SchedulerConfig(BaseModel):
             "x-order": 1,
         },
     )
-    start_early_seconds: int = Field(
+    offset: int | None = Field(
         default=10,
         ge=0,
-        le=59,
-        alias="start early seconds",
+        le=60,
+        validation_alias=AliasChoices("offset", "start early seconds"),
         description="Seconds before the scheduled minute to start tasks",
         json_schema_extra={
-            "x-help": "Start scheduled tasks this many seconds before the configured minute so subprocess initialization can finish at the interval boundary.",
+            "x-help": "Start scheduled tasks this many seconds before the configured minute so subprocess initialization can finish at the interval boundary. The legacy 'start early seconds' option is also accepted.",
             "x-ui-section": "Scheduler",
-            "x-unit": "seconds",
-            "x-validation-hint": "Must be between 0 and 59 seconds",
+            "x-unit": "s",
+            "x-validation-hint": "Must be between 0 and 60 seconds",
         },
     )
     schedule: list[ScheduleEntry] = Field(

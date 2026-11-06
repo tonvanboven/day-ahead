@@ -1,16 +1,21 @@
 import datetime
 import json
-import math
 import logging
+import math
+
+import ephem
+import knmi
+import matplotlib.pyplot as plt
 import pandas as pd
 import pytz
-import ephem
 from requests import get
-import matplotlib.pyplot as plt
-import knmi
+from sqlalchemy import Table, and_, func, select
+
 from dao.lib.da_graph import GraphBuilder
 from dao.lib.db_manager import DBmanagerObj
-from sqlalchemy import Table, select, func, and_
+
+# Stookgrens in oC waarbij geen graaddagen meer worden gerekend (fallback)
+DEFAULT_DEGREE_DAYS_BASE_TEMP = 16.0
 
 
 # noinspection PyUnresolvedReferences
@@ -93,7 +98,7 @@ class Meteo:
 
         alfa_zon = lamda_zon_deg - 2.468 * math.sin(2 * lamda_zon_rad) + 0.053 * math.sin(
             4 * lamda_zon_rad) - 0.0014 * math.sin(6 * lamda_zon_rad)  # in graden
-        delta_zon = 22.8008 * math.sin(lamda_zon_rad) + 0.5999 * pow(math.sin(lamda_zon_rad), 3) 
+        delta_zon = 22.8008 * math.sin(lamda_zon_rad) + 0.5999 * pow(math.sin(lamda_zon_rad), 3)
                     + 0.0493 * pow(math.sin(lamda_zon_rad), 5)
         delta_zon_rad = math.radians(delta_zon)
         noorder_breedte = self.latitude
@@ -110,11 +115,11 @@ class Meteo:
 
         # hoogte boven horizon
         h_rad = math.asin(math.sin(noorder_breedte_rad) * math.sin(delta_zon_rad)
-                          + math.cos(noorder_breedte_rad) * math.cos(delta_zon_rad) * 
+                          + math.cos(noorder_breedte_rad) * math.cos(delta_zon_rad) *
                           math.cos(h_rad))
         a_rad = math.atan2(math.sin(h_rad),
-                           math.cos(h_rad) * math.sin(noorder_breedte_rad) - 
-                           math.tan(delta_zon_rad) * math.cos(noorder_breedte_rad))  
+                           math.cos(h_rad) * math.sin(noorder_breedte_rad) -
+                           math.tan(delta_zon_rad) * math.cos(noorder_breedte_rad))
                            # links of rechts van zuid
         result = {'h': h_rad, 'A': a_rad}
 
@@ -122,40 +127,40 @@ class Meteo:
         """
         # vanaf hier nieuwe methode
         """
-   
+
         Declinatie en uurhoek
-        De in de afbeelding over deklinatie en uurhoek getekende hoeken zoals u en d leggen 
-        de stralingsrichting vast. 
-        Op iedere datum geldt: d = constant. Deze constante kan op de n- de dag van het jaar 
-        met grote nauwkeurigheid 
+        De in de afbeelding over deklinatie en uurhoek getekende hoeken zoals u en d leggen
+        de stralingsrichting vast.
+        Op iedere datum geldt: d = constant. Deze constante kan op de n- de dag van het jaar
+        met grote nauwkeurigheid
         worden berekend met behulp van formule 1:
         d = 23,44° sin {360°(284 + n)/365} (1)
         Eveneens op iedere datum geldt, dat:
         u = t x 15° (2)
-        met t gelijk aan de tijd in uren volgens Z.T. Met gehulp van (1) en (2) kan nu de 
-        stralingsrichting worden 
+        met t gelijk aan de tijd in uren volgens Z.T. Met gehulp van (1) en (2) kan nu de
+        stralingsrichting worden
         gevonden op ieder gewenst tijdstip op iedere gewenste datum.
 
         Azimut en zonshoogte
-        De stralingsrichting is ook vast te leggen met behulp van de hoeken a en h. Zie de figuur 
-        over Azimut en  
-        zonshoogte. In appendix A is afgeleid, hoe deze hoeken kunnen worden geschreven als functie 
-        van de zojuist 
-        genoemde hoeken u en d. Het blijkt handiger om h te schrijven als functie van u en d en 
-        om a te schrijven als 
+        De stralingsrichting is ook vast te leggen met behulp van de hoeken a en h. Zie de figuur
+        over Azimut en
+        zonshoogte. In appendix A is afgeleid, hoe deze hoeken kunnen worden geschreven als functie
+        van de zojuist
+        genoemde hoeken u en d. Het blijkt handiger om h te schrijven als functie van u en d en
+        om a te schrijven als
         functie van u, d en h. Gevonden wordt:
         h = arcsin (sin ф sin d – cos ф cos d cos u) (3)
         a = arcsin { (cos d sin u) / cos h } (4)
-        De hoek ф is gelijk aan de breedtegraad van de plaats op aarde, waar a en h moeten 
-        worden bepaald. 
-        De waarden, die a en h aannemen, zijn nu dus plaatsafhankelijk. 
+        De hoek ф is gelijk aan de breedtegraad van de plaats op aarde, waar a en h moeten
+        worden bepaald.
+        De waarden, die a en h aannemen, zijn nu dus plaatsafhankelijk.
         """
         """
         dt = datetime.datetime.fromtimestamp(utc_time)
         dt_start = datetime.datetime(dt.year,1,1)
         dif = dt - dt_start
         n = dif.days
-        d = math.radians(23.44 *  math.sin(math.radians(360*(284 + n) / 365))) # declinatie 
+        d = math.radians(23.44 *  math.sin(math.radians(360*(284 + n) / 365))) # declinatie
         in radialen
         dtz = datetime.datetime.fromtimestamp(utc_time, tz=pytz.utc)
         t = dtz.hour
@@ -196,7 +201,7 @@ class Meteo:
         station :code van een knmi station
         :return: boolean
         """
-        """ 
+        """
         start = datetime.date.today() - datetime.timedelta(days=4)
         knmi_df = knmi.get_hour_data_dataframe(
             [station],
@@ -243,7 +248,24 @@ class Meteo:
         ]
         return station in list_aws
 
-    def which_station(self) -> str:
+    @staticmethod
+    def afstand_km(lat1, long1, lat2, long2):
+        """
+        berekent de afstand in km tussen locatie 1 en locatie 2
+        :param lat1: latitude locatie 1
+        :param long1: longitude locatie 1
+        :param lat2: latitude locatie 2
+        :param long2: longitude locatie 2
+        :return:
+        """
+        lat1, long1, lat2, long2 = map(math.radians, (lat1, long1, lat2, long2))
+        dlat = lat2 - lat1
+        dlong = long2 - long1
+        a = math.sin(dlat / 2)**2 + math.cos(lat1) * math.cos(lat2) * (math.sin(dlong / 2))**2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        return 6371 * c
+
+    def which_station(self, _latitude:float|None = None, _longitude: float|None = None) -> str:
         """
         berekent welk weerstation het dichtst bij is
         :param latitude:
@@ -253,12 +275,17 @@ class Meteo:
         stations = knmi.stations
         distance = None
         result = None
+        latitude = _latitude if _latitude else self.latitude
+        longitude = _longitude if _longitude else self.longitude
         for key in stations:
             if self.is_aws(key):
                 station = stations[key]
-                afstand = (self.latitude - station.latitude) ** 2 + (
-                    self.longitude - station.longitude
+                afstand = self.afstand_km(latitude, longitude, station.latitude, station.longitude)
+                """
+                afstand = (latitude - station.latitude) ** 2 + (
+                    longitude - station.longitude
                 ) ** 2
+                """
                 if result is None or afstand < distance:
                     distance = afstand
                     result = key
@@ -427,7 +454,8 @@ class Meteo:
 
         df = pd.DataFrame.from_records(data)
         df1 = df[["tijd", "tijd_nl", "gr", "temp", "winds", "neersl"]]
-        df1 = df1[:96]
+        df1["tijd"] = df1["tijd"].astype(int)
+        df1 = df1[df1["tijd"].diff().fillna(0) <= 3600]
         logging.info(f"Meteodata model {model}")
         logging.info(
             f"Aantal uitgevoerde ophaalpogingen: {count + 1} van maximaal: {self.meteoserver_attempts}"
@@ -527,7 +555,7 @@ class Meteo:
         url = "https://api.forecast.solar/estimate/watthours/"+str(self.latitude)+"/"
                 +str(self.longitude)+"/45/5/5.5"
         resp = get(url)
-        
+
         print (resp.text)
         json_object = json.loads(resp.text)
         data = json_object["result"]
@@ -545,47 +573,47 @@ class Meteo:
             if (day != last_day): # or (last_hour < hour-1):
                 if last_day == -1:
                     for h in range(last_hour+1, hour):
-                        time_h = dt.datetime(datetime_obj.year, datetime_obj.month, 
+                        time_h = dt.datetime(datetime_obj.year, datetime_obj.month,
                         datetime_obj.day, h,0,0 )
                         time_utc = dt.datetime.timestamp(time_h) - 3600
-                        df_db.loc[df_db.shape[0]] = [str(int(time_utc)), 
+                        df_db.loc[df_db.shape[0]] = [str(int(time_utc)),
                         time_h.strftime("%Y-%m-%d %H:%M"), 'pv', 0]
                 else:
                     for h in range(last_hour + 1, 24):
                         time_h = dt.datetime(last_datetime_obj.year,last_datetime_obj.month,
                         last_datetime_obj.day,h,0,0)
                         time_utc = dt.datetime.timestamp(time_h) - 3600
-                        df_db.loc[df_db.shape[0]] = [str(int(time_utc)), 
+                        df_db.loc[df_db.shape[0]] = [str(int(time_utc)),
                         time_h.strftime("%Y-%m-%d %H:%M"), 'pv', 0]
                     for h in range(0, hour):
-                        time_h = dt.datetime(datetime_obj.year, datetime_obj.month, 
+                        time_h = dt.datetime(datetime_obj.year, datetime_obj.month,
                         datetime_obj.day, h, 0, 0)
                         time_utc = dt.datetime.timestamp(time_h) - 3600
-                        df_db.loc[df_db.shape[0]] = [str(int(time_utc)), 
+                        df_db.loc[df_db.shape[0]] = [str(int(time_utc)),
                         time_h.strftime("%Y-%m-%d %H:%M"), 'pv', 0]
                     last_value = 0
             time_h = dt.datetime(datetime_obj.year, datetime_obj.month, d
             atetime_obj.day, hour, 0, 0)
             time_utc = dt.datetime.timestamp(time_h) -3600
-            df_db.loc[df_db.shape[0]] = [str(int(time_utc)), time_h.strftime("%Y-%m-%d %H:%M"), 
+            df_db.loc[df_db.shape[0]] = [str(int(time_utc)), time_h.strftime("%Y-%m-%d %H:%M"),
             'pv', pv_w - last_value]
             last_hour = hour
             last_value = pv_w
             last_day = day
             last_datetime_obj = datetime_obj
         for h in range(last_hour + 1, 24):
-            time_h = dt.datetime(last_datetime_obj.year, last_datetime_obj.month, 
+            time_h = dt.datetime(last_datetime_obj.year, last_datetime_obj.month,
             last_datetime_obj.day, h, 0, 0)
             time_utc = dt.datetime.timestamp(time_h) - 3600
-            df_db.loc[df_db.shape[0]] = [str(int(time_utc)), 
+            df_db.loc[df_db.shape[0]] = [str(int(time_utc)),
             time_h.strftime("%Y-%m-%d %H:%M"), 'pv', 0]
 
         print(df_db)
 
-        graphs.make_graph_meteo(df_db, file = "../data/images/meteo" + 
-                                              datetime.datetime.now().strftime("%H%M") + 
+        graphs.make_graph_meteo(df_db, file = "../data/images/meteo" +
+                                              datetime.datetime.now().strftime("%H%M") +
                                              ".png", show=show_graph)
-                               
+
         del df_db["time_str"]
         print(df_db)
         self.db_da.savedata(df_db)
@@ -593,10 +621,10 @@ class Meteo:
 
     def get_avg_temperature(self, date: datetime.datetime = None) -> float:
         """
-        Berekent gewogen met temperatuur grens van 16 oC
+        Berekent de gemiddelde buitentemperatuur over 24 uur vanaf het begin van de dag
         :param date: de datum waarvoor de berekening wordt gevraagd
         als None: vandaag
-        :return: berekende gewogen graaddagen
+        :return: de gemiddelde temperatuur in oC
         """
         if date is None:
             date = datetime.datetime.combine(
@@ -643,8 +671,8 @@ class Meteo:
             "SELECT AVG(t1.`value`) avg_temp FROM "
             "(SELECT `time`, `value`,  from_unixtime(`time`) 'begin' "
             "FROM `values` , `variabel` "
-            "WHERE `variabel`.`code` = 'temp' 
-                AND `values`.`variabel` = `variabel`.`id` 
+            "WHERE `variabel`.`code` = 'temp'
+                AND `values`.`variabel` = `variabel`.`id`
                 AND time >= " + str(date_utc) + " "
             "ORDER BY `time` ASC LIMIT 24) t1 "
         )
@@ -658,13 +686,16 @@ class Meteo:
         date: datetime.datetime = None,
         avg_temp: float | None = None,
         weighted: bool = False,
+        base_temp: float = DEFAULT_DEGREE_DAYS_BASE_TEMP,
     ) -> float:
         """
-        Berekent graaddagen met temperatuur grens van 16 oC
+        Berekent graaddagen met een instelbare temperatuurgrens (stookgrens)
         :param date: de datum waarvoor de berekening wordt gevraagd
                     als None: vandaag
         :param avg_temp: de gemiddelde temperatuur, default None
         :param weighted: boolean, gewogen als true, default false
+        :param base_temp: de stookgrens in oC: vanaf deze gemiddelde
+                    temperatuur zijn er geen graaddagen, default 16 oC
         :return: berekende eventueel gewogen graaddagen
         """
         if date is None:
@@ -680,10 +711,10 @@ class Meteo:
                 weight_factor = 1.1
             elif 4 <= mon <= 9:
                 weight_factor = 0.8
-        if avg_temp >= 16:
+        if avg_temp >= base_temp:
             result = 0
         else:
-            result = weight_factor * (16 - avg_temp)
+            result = weight_factor * (base_temp - avg_temp)
         return result
 
     def calc_solar_rad(
@@ -707,14 +738,34 @@ class Meteo:
         q_tot = self.solar_rad(float(utc_time), global_rad, hcol, acol)
         return q_tot
 
+def test_afstand_km(meteo):
+    # Amsterdam -> Rotterdam (ongeveer 57 km)
+    d1 = meteo.afstand_km(52.3676, 4.9041, 51.9244, 4.4777)
+    print(f"Amsterdam -> Rotterdam: {d1:.2f} km")
+    assert 50 < d1 < 70
 
-"""
+    # Parijs -> Londen (ongeveer 344 km)
+    d2 = meteo.afstand_km(48.8566, 2.3522, 51.5074, -0.1278)
+    print(f"Parijs -> Londen: {d2:.2f} km")
+    assert 300 < d2 < 400
+
+    # Zelfde punt -> 0
+    d3 = meteo.afstand_km(52.0, 5.0, 52.0, 5.0)
+    print(f"Zelfde punt: {d3:.2f} km")
+    assert abs(d3) < 1e-9
+
+    station=meteo.which_station()
+    print(station)
+
+    print("Alle tests geslaagd.")
+
 def main():
     from dao.prog.da_base import DaBase
     dbase = DaBase("../data/options.json")
-    meteo = Meteo(dbase.config, dbase.db_da)
+    meteo = dbase.meteo
     station = meteo.which_station()
+    print(station)
+    test_afstand_km(meteo)
 
 if __name__ == "__main__":
     main()
-"""

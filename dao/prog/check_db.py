@@ -1,38 +1,39 @@
 import datetime
 import logging
-import tzlocal
+import sys
+from pathlib import Path
 
+import pandas as pd
+import tzlocal
 from sqlalchemy import (
-    Table,
-    Column,
-    Integer,
-    DateTime,
-    String,
     BigInteger,
+    Column,
+    DateTime,
     Float,
     ForeignKey,
+    Index,
+    Integer,
+    String,
+    Table,
     UniqueConstraint,
-    select,
-    desc,
-    insert,
-    update,
-    text,
     and_,
     delete,
-    literal_column,
+    desc,
+    insert,
     inspect,
-    Index,
-    column,
+    literal,
+    literal_column,
+    select,
+    text,
+    update,
 )
-import pandas as pd
-import sys
+from utils import version_number
+from version import __version__
+
+from dao.lib.db_connections import make_db_da
 
 #  sys.path.append("../")
 from dao.prog.config.loader import ConfigurationLoader
-from dao.lib.db_connections import make_db_da
-from pathlib import Path
-from version import __version__
-from utils import version_number
 
 
 class CheckDB:
@@ -75,7 +76,6 @@ class CheckDB:
         with self.engine.connect() as connection:
             connection.execute(query)
             connection.commit()
-        return
 
     def get_all_var_data(
         self,
@@ -121,7 +121,6 @@ class CheckDB:
         with self.engine.connect() as connection:
             connection.execute(delete_stmt)
             connection.commit()
-        return
 
     def move_meteodata_to_prognoses(self):
         variabelen = [
@@ -273,7 +272,7 @@ class CheckDB:
             record_2025_12_2 = [24, "neersl", "Neerslag", "mm"]
             self.upsert_variabel(variabel_tabel, record_2025_12_2)
             print('Table "variabel" geupdated met neerslag.')
-            print(f'Meteo-data verhuizen van "values" naar "prognoses"')
+            print('Meteo-data verhuizen van "values" naar "prognoses"')
             self.move_meteodata_to_prognoses()
 
         """
@@ -330,35 +329,22 @@ class CheckDB:
             print('Table "variabel" geupdated.')
         """
 
-        # Maak de kolom "aggregate" als deze niet bestaat
-        inspector = inspect(self.engine)
-        columns = [column["name"] for column in inspector.get_columns("variabel")]
-        has_aggregate = "aggregate" in columns
-
-        if not has_aggregate:
+        # Create aggregate column if it does not exist
+        if self.ensure_column('variabel', 'aggregate', 'VARCHAR(3) NOT NULL', 'avg'):
             with self.engine.begin() as connection:
-                quoted_aggregate = self.engine.dialect.identifier_preparer.quote("aggregate")
-
-                connection.execute(
-                    text(
-                        f'ALTER TABLE variabel '
-                        f'ADD COLUMN {quoted_aggregate} VARCHAR(3) NOT NULL DEFAULT "avg"'
-                    )
-                )
-
+                qagg = self.engine.dialect.identifier_preparer.quote('aggregate')
                 connection.execute(
                     text(
                         f"""
                         UPDATE variabel
-                        SET {quoted_aggregate} = CASE
+                        SET {qagg} = CASE
                             WHEN dim IN ('kWh', 'euro', 'mm') THEN 'sum'
                             ELSE 'avg'
                         END
                         """
                     )
                 )
-
-            print('Kolom "aggregate" toegevoegd aan tabel "variabel"    ')
+                print('Defaults for "aggregate" set on table "variabel"')
 
         # Voeg indexen toe op kolom `time` in de values en prognoses tabel, indien niet bestaand
         self.ensure_time_indexes()
@@ -388,7 +374,6 @@ class CheckDB:
             with self.engine.connect() as connection:
                 connection.execute(insert_query)
                 connection.commit()
-
 
     def ensure_time_indexes(self) -> None:
         indexes = (
@@ -427,6 +412,43 @@ class CheckDB:
                     print(
                         f"Index '{index_name}' toegevoegd aan tabel '{table_name}'."
                     )
+
+    def ensure_column(self, table_name: str, column_name: str, type: String, default: String = None) -> bool:
+        """
+        Create a column on a table if it does not exist
+        :return: Boolean indicating whether the column was created
+        """
+        inspector = inspect(self.engine)
+        columns = [column["name"] for column in inspector.get_columns(table_name)]
+        has_column = column_name in columns
+
+        if not has_column:
+            with self.engine.begin() as connection:
+                quoted_table = self.engine.dialect.identifier_preparer.quote(table_name)
+                quoted_column = self.engine.dialect.identifier_preparer.quote(column_name)
+
+                if default is not None:
+                    quoted_default = literal(default).compile(
+                        dialect=self.engine.dialect,
+                        compile_kwargs={"literal_binds": True},
+                    )
+                    default_expr = f'DEFAULT {quoted_default}'
+                else:
+                    default_expr = ''
+
+                connection.execute(
+                    text(
+                        f'ALTER TABLE {quoted_table} '
+                        f'ADD COLUMN {quoted_column} {type} {default_expr}'
+                    )
+                )
+
+            print(f'Kolom "{column_name}" toegevoegd aan tabel "{table_name}"    ')
+
+            return True
+
+        return False
+
 
 def main():
     checkdb = CheckDB("../data/options.json")

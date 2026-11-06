@@ -1,13 +1,13 @@
 """Pydantic models for configuration."""
 
-from .base import EntityId, FlexValue, FlexFloat, FlexInt, FlexBool, FlexStr, SecretStr
+from .base import EntityId, FlexBool, FlexFloat, FlexInt, FlexStr, FlexValue, SecretStr
 
 __all__ = [
     "EntityId",
-    "FlexValue",
+    "FlexBool",
     "FlexFloat",
     "FlexInt",
-    "FlexBool",
     "FlexStr",
+    "FlexValue",
     "SecretStr",
 ]

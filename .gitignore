@@ -14,8 +14,12 @@ __pycache__/
 dao/data/*.csv
 /dao/data/batteries.json
 .venv
+.venv-tools/
+/.ruff.toml
+/.ruff.toml-*.tmp
+.ruff_cache/
+.pytest_cache/
 dao/data/options_unversioned.json
-dao/pred/data/da_prediction.pkl
 dao/data/options_new.json
 
 /dao/data/task_state.json
@@ -24,3 +28,7 @@ dao/webserver/node_modules
 dao/webserver/app/static/build
 /dao/data/home-assistant_v2.db-journal
 /dao/data/meta
+
+/.local/
+/.env
+scripts/convert_db.sh

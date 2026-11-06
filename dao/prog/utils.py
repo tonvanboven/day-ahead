@@ -1,16 +1,18 @@
-from dateutil import easter
-import datetime
 import bisect
-import math
+import datetime
 import json
+import logging
+import math
 import os
 import sys
+import traceback
+
 import numpy as np
 import pandas as pd
+from dateutil import easter
 from requests import post
-import logging
-import traceback
-from sqlalchemy import Table, select, and_
+from sqlalchemy import Table, and_, select
+
 from dao.prog.version import __version__
 
 
@@ -92,9 +94,10 @@ def convert_timestr(time_str: str, now_dt: datetime.datetime) -> datetime.dateti
 
 
 def get_tibber_data():
-    from dao.prog.config.loader import ConfigurationLoader
-    from dao.lib.db_connections import make_db_da
     from pathlib import Path
+
+    from dao.lib.db_connections import make_db_da
+    from dao.prog.config.loader import ConfigurationLoader
 
     def get_datetime_from_str(s):
         # "2022-09-01T01:00:00.000+02:00"
@@ -133,7 +136,7 @@ def get_tibber_data():
             latest_ts = start_ts
         except Exception as ex:
             error_handling(ex)
-            return
+            return False
 
     # no starttime
     if (len(sys.argv) <= 2) or (start_ts is None):
@@ -170,11 +173,11 @@ def get_tibber_data():
     count = math.ceil((now_ts - latest_ts) / 3600)
     logging.info(
         f"Tibber data present tot en met: "
-        f"{str(datetime.datetime.fromtimestamp(latest_ts - 3600))}"
+        f"{datetime.datetime.fromtimestamp(latest_ts - 3600)!s}"
     )
     if count < 24:
         logging.info("Er worden geen data opgehaald.")
-        return
+        return False
 
     query = (
         "{ "
@@ -218,12 +221,12 @@ def get_tibber_data():
         timestamp = int(get_datetime_from_str(node["from"]).timestamp())
         if timestamp < today_ts:
             time_stamp = str(timestamp)
-            if not (node["production"] is None):
+            if node["production"] is not None:
                 code = "prod"
                 value = float(node["production"])
                 logging.info(f"{node} {time_stamp} {value}")
                 tibber_df.loc[tibber_df.shape[0]] = [time_stamp, code, value]
-            if not (node["profit"] is None):
+            if node["profit"] is not None:
                 code = "profit"
                 value = float(node["profit"])
                 logging.info(f"{node} {time_stamp} {value}")
@@ -233,12 +236,12 @@ def get_tibber_data():
         timestamp = int(get_datetime_from_str(node["from"]).timestamp())
         if timestamp < today_ts:
             time_stamp = str(timestamp)
-            if not (node["consumption"] is None):
+            if node["consumption"] is not None:
                 code = "cons"
                 value = float(node["consumption"])
                 logging.info(f"{node} {time_stamp} {value}")
                 tibber_df.loc[tibber_df.shape[0]] = [time_stamp, code, value]
-            if not (node["cost"] is None):
+            if node["cost"] is not None:
                 code = "cost"
                 value = float(node["cost"])
                 logging.info(f"{node} {time_stamp} {value}")
@@ -366,7 +369,7 @@ def interpolate_old(
     row = None
     old_val = None
     now_val = None
-    for new_index, new_row in org_df.iterrows():
+    for _new_index, new_row in org_df.iterrows():
         if row is None:
             row = new_row
             continue
@@ -413,9 +416,10 @@ print(all_interp)
 
 
 def interpolate_prognose_data():
-    from dao.prog.config.loader import ConfigurationLoader
-    from dao.lib.db_connections import make_db_da
     from pathlib import Path
+
+    from dao.lib.db_connections import make_db_da
+    from dao.prog.config.loader import ConfigurationLoader
 
     loader = ConfigurationLoader(Path("../data/options.json"))
     config = loader.load_and_validate()
@@ -426,7 +430,7 @@ def interpolate_prognose_data():
     print(prognose_data.to_string())
 
 
-def interpolate(df: pd.DataFrame, field: str, quantity: bool = False) -> pd.DataFrame:
+def interpolate(df: pd.DataFrame, field: str, quantity: bool = False, time_field:str="tijd") -> pd.DataFrame:
     """
     Interpoleert uurwaarden (gegeven op hele uren, feitelijk H:30) naar kwartierwaarden.
     Voor elk uurblok worden 4 kwartierwaarden berekend, zodanig dat het gemiddelde
@@ -439,6 +443,7 @@ def interpolate(df: pd.DataFrame, field: str, quantity: bool = False) -> pd.Data
         - "tijd": datetime (op hele uren, bv. 09:00 betekent waarde voor 09:30)
         - field: float/int, uurwaarden
     field: str, name of the column
+    time_field: str: name of time-column, default "tijd"
     quantity: bool, is it a quantity
 
     Returns
@@ -450,7 +455,7 @@ def interpolate(df: pd.DataFrame, field: str, quantity: bool = False) -> pd.Data
     result = []
 
     for i in range(len(df)):
-        t_curr = df.loc[i, "tijd"]
+        t_curr = df.loc[i, time_field]
         v_curr = df.loc[i, field]
 
         if i == 0:
@@ -507,18 +512,19 @@ def interpolate(df: pd.DataFrame, field: str, quantity: bool = False) -> pd.Data
         for k in range(4):
             result.append(
                 {
-                    "tijd": t_curr + datetime.timedelta(minutes=15 * k),
+                    time_field: t_curr + datetime.timedelta(minutes=15 * k),
                     field: float(quarters[k]),
                 }
             )
     result_df = pd.DataFrame(result)
-    result_df.index = pd.to_datetime(result_df["tijd"])
+    result_df.index = pd.to_datetime(result_df[time_field])
     return result_df
 
 
 def tst_interpolate_df():
-    import pandas as pd
     import datetime
+
+    import pandas as pd
 
     data = pd.DataFrame(
         {

@@ -1,4 +1,6 @@
-from flask import Flask
+import os
+
+from flask import Flask, abort, request, send_from_directory
 
 
 class IngressMiddleware:
@@ -19,13 +21,56 @@ class IngressMiddleware:
 app = Flask(__name__)
 app.secret_key = "secret_cookie_key"
 app.wsgi_app = IngressMiddleware(app.wsgi_app)
+app.config["DAO_WEB_PREVIEW"] = bool(os.environ.get("DAO_WEB_DATA_DIR"))
 
-from . import routes
-from .v2.routes import v2
-from .v2.api.routes import api
 
+@app.before_request
+def isolate_preview_tasks():
+    """Keep live task processes and shared task state outside the preview."""
+    if not app.config["DAO_WEB_PREVIEW"]:
+        return None
+    task_endpoints = {
+        "v1.run_process", "v1.status", "v1.show_log",
+        "v2.tasks", "v2.task_exec", "v2.task_cancel", "v2.task_state",
+        "api.run_api", "v2_api.run", "v2_api.task_exec_json",
+        "v2_api.task_cancel_json", "v2_api.task_state_json",
+    }
+    if (
+        request.endpoint in task_endpoints
+        or "current_bewerking" in request.form
+        or "menu_run" in request.form
+        or request.form.get("current_menu") == "run"
+    ):
+        return (
+            ("Live tasks are unavailable in the isolated web preview. "
+            "Use the synthetic scenario debugger to develop the calculation core."),
+            403,
+            {"Content-Type": "text/plain; charset=utf-8"},
+        )
+    return None
+
+
+# The development preview keeps its configuration and output outside dao/data.
+if os.environ.get("DAO_WEB_DATA_DIR"):
+    @app.route("/static/data/<path:filename>")
+    def development_data(filename):
+        if filename.split("/", 1)[0] not in ("images", "log"):
+            abort(404)
+        return send_from_directory(os.environ["DAO_WEB_DATA_DIR"], filename)
+
+# Initialize the app before importing modules that register routes.
+# isort: off
+from . import routes as routes  # noqa: E402
+from .v1.routes import app as v1  # noqa: E402
+from .v2.routes import v2  # noqa: E402
+from .api.routes import api  # noqa: E402
+from .v2.api.routes import api as v2_api  # noqa: E402
+# isort: on
+
+app.register_blueprint(v1, name="v1", url_prefix="/v1")
 app.register_blueprint(v2, name="v2", url_prefix="/v2")
-app.register_blueprint(api, name="api", url_prefix="/v2/api")
+app.register_blueprint(api, name="api", url_prefix="/api")
+app.register_blueprint(v2_api, name="v2_api", url_prefix="/v2/api")
 
 #  if __name__ == '__main__':
 #      app.run()

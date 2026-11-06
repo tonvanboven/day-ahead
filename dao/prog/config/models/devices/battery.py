@@ -2,8 +2,9 @@
 Battery configuration models.
 """
 
-from typing import Optional
-from pydantic import BaseModel, Field, field_validator, ConfigDict, PrivateAttr
+
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
+
 from ..base import EntityId, FlexFloat, FlexInt
 from .solar import SolarConfig
 
@@ -35,6 +36,7 @@ class BatteryStage(BaseModel):
 
     model_config = ConfigDict(
         extra="allow",
+        loc_by_alias=False,
         json_schema_extra={
             "x-help": "Defines power and efficiency at a specific operating point. Multiple stages create a power/efficiency curve.",
             "x-ui-section": "Power Configuration",
@@ -130,7 +132,7 @@ class BatteryConfig(BaseModel):
             "x-validation-hint": "0-100%, protects battery from deep discharge",
         },
     )
-    optimal_lower_level: Optional[FlexInt] = Field(
+    optimal_lower_level: FlexInt | None = Field(
         default=None,
         alias="optimal lower level",
         description="Optimal lower SOC % for cost optimization",
@@ -151,7 +153,7 @@ class BatteryConfig(BaseModel):
             "x-ui-section": "Power Configuration",
         },
     )
-    entity_min_soc_end_opt: Optional[EntityId] = Field(
+    entity_min_soc_end_opt: EntityId | None = Field(
         default=None,
         alias="entity min soc end opt",
         description="HA entity for minimum SOC at end of optimization period",
@@ -161,7 +163,7 @@ class BatteryConfig(BaseModel):
             "x-ui-widget-filter": "sensor,input_number",
         },
     )
-    entity_max_soc_end_opt: Optional[EntityId] = Field(
+    entity_max_soc_end_opt: EntityId | None = Field(
         default=None,
         alias="entity max soc end opt",
         description="HA entity for maximum SOC at end of optimization period",
@@ -199,7 +201,7 @@ class BatteryConfig(BaseModel):
     )
 
     # Power reduction
-    reduced_hours: Optional[dict[str, int]] = Field(
+    reduced_hours: dict[str, int] | None = Field(
         default=None,
         alias="reduced hours",
         description="Hour -> max power mapping for reduced power hours",
@@ -225,7 +227,7 @@ class BatteryConfig(BaseModel):
             "x-ui-section": "Power Configuration",
         },
     )
-    minimum_power: Optional[int] = Field(
+    minimum_power: int | None = Field(
         default=0,
         alias="minimum power",
         ge=0,
@@ -251,7 +253,7 @@ class BatteryConfig(BaseModel):
             "x-validation-hint": "0.0-1.0, typically 0.95-0.98",
         },
     )
-    dc_to_bat_max_power: Optional[FlexFloat] = Field(
+    dc_to_bat_max_power: FlexFloat | None = Field(
         default=None,
         alias="dc_to_bat max power",
         description="DC to battery max power in watts",
@@ -274,7 +276,7 @@ class BatteryConfig(BaseModel):
             "x-validation-hint": "0.0-1.0, typically 0.95-0.98",
         },
     )
-    bat_to_dc_max_power: Optional[FlexFloat] = Field(
+    bat_to_dc_max_power: FlexFloat | None = Field(
         default=None,
         alias="bat_to_dc max power",
         description="Battery to DC max power in watts",
@@ -290,17 +292,26 @@ class BatteryConfig(BaseModel):
     cycle_cost: float = Field(
         alias="cycle cost",
         ge=0,
-        description="Cost per battery cycle in euros",
+        description="Battery wear cost per kWh moved, charged on charging and on discharging",
         json_schema_extra={
-            "x-help": "Degradation cost per full charge-discharge cycle in euros. Used to factor battery wear into optimization. Calculate as: (battery_cost / warranted_cycles). Example: €5000 battery with 6000 cycles = €0.83/cycle.",
-            "x-unit": "€",
+            "x-help": (
+                "Degradation cost in euros per kWh moved in or out of the battery, "
+                "measured on the DC side. It is charged twice per cycle: once on the "
+                "charge leg and once on the discharge leg (half cycles). One full "
+                "charge-discharge of E kWh therefore costs about 2 × cycle cost × E. "
+                "Convert a per-cycle figure with: "
+                "cycle cost = battery_cost / (warranted_cycles × capacity × 2). "
+                "Example: a €5000, 10 kWh battery warranted for 6000 cycles is "
+                "€0.83 per full cycle, so enter 5000 / (6000 × 10 × 2) = 0.042 €/kWh."
+            ),
+            "x-unit": "€/kWh",
             "x-ui-section": "Power Configuration",
-            "x-validation-hint": "Must be >= 0, typically €0.50-€1.50 per cycle",
+            "x-validation-hint": "Must be >= 0, typically €0.01-€0.05 per kWh",
         },
     )
 
     # Control entities
-    entity_set_power_feedin: Optional[EntityId] = Field(
+    entity_set_power_feedin: EntityId | None = Field(
         default=None,
         alias="entity set power feedin",
         description="HA entity to set power feed-in to grid",
@@ -320,7 +331,7 @@ class BatteryConfig(BaseModel):
             "x-ui-widget-filter": "switch",
         },
     )
-    entity_set_operating_mode: Optional[EntityId] = Field(
+    entity_set_operating_mode: EntityId | None = Field(
         default=None,
         alias="entity set operating mode",
         description="HA entity to set battery operating mode",
@@ -330,7 +341,7 @@ class BatteryConfig(BaseModel):
             "x-ui-widget-filter": "select,input_select,switch",
         },
     )
-    entity_set_operating_mode_on: Optional[str] = Field(
+    entity_set_operating_mode_on: str | None = Field(
         default="Aan",
         alias="entity set operating mode on",
         description="Value for operating mode ON",
@@ -339,7 +350,7 @@ class BatteryConfig(BaseModel):
             "x-ui-section": "Power Configuration",
         },
     )
-    entity_set_operating_mode_off: Optional[str] = Field(
+    entity_set_operating_mode_off: str | None = Field(
         default="Uit",
         alias="entity set operating mode off",
         description="Value for operating mode OFF",
@@ -348,7 +359,7 @@ class BatteryConfig(BaseModel):
             "x-ui-section": "Power Configuration",
         },
     )
-    entity_stop_inverter: Optional[EntityId] = Field(
+    entity_stop_inverter: EntityId | None = Field(
         default=None,
         alias="entity stop inverter",
         description="HA entity to stop inverter",
@@ -360,7 +371,7 @@ class BatteryConfig(BaseModel):
     )
 
     # Monitoring entities
-    entity_from_battery: Optional[EntityId] = Field(
+    entity_from_battery: EntityId | None = Field(
         default=None,
         alias="entity from battery",
         description="HA entity for power from battery",
@@ -371,7 +382,7 @@ class BatteryConfig(BaseModel):
             "x-ui-widget-filter": "sensor",
         },
     )
-    entity_from_pv: Optional[EntityId] = Field(
+    entity_from_pv: EntityId | None = Field(
         default=None,
         alias="entity from pv",
         description="HA entity for power from PV",
@@ -382,7 +393,7 @@ class BatteryConfig(BaseModel):
             "x-ui-widget-filter": "sensor",
         },
     )
-    entity_from_ac: Optional[EntityId] = Field(
+    entity_from_ac: EntityId | None = Field(
         default=None,
         alias="entity from ac",
         description="HA entity for power from AC",
@@ -393,7 +404,7 @@ class BatteryConfig(BaseModel):
             "x-ui-widget-filter": "sensor",
         },
     )
-    entity_calculated_soc: Optional[EntityId] = Field(
+    entity_calculated_soc: EntityId | None = Field(
         default=None,
         alias="entity calculated soc",
         description="HA entity for saving calculated SOC",
@@ -405,7 +416,7 @@ class BatteryConfig(BaseModel):
             "x-ui-widget-filter": "sensor",
         },
     )
-    entity_battery_next_action: Optional[EntityId] = Field(
+    entity_battery_next_action: EntityId | None = Field(
         default=None,
         alias="entity battery next action",
         description="HA entity for the timestamp of this battery's next planned action",
@@ -432,6 +443,7 @@ class BatteryConfig(BaseModel):
     model_config = ConfigDict(
         extra="allow",
         populate_by_name=True,
+        loc_by_alias=False,
         json_schema_extra={
             "x-ui-group": "Energy",
             "x-icon": "battery-charging",

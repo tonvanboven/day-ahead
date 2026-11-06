@@ -1,44 +1,43 @@
+import base64
 import calendar
 import datetime
+import itertools
+import json
+import logging
+import math
+from io import BytesIO
+
+import matplotlib.pyplot as plt
 
 # from unittest.mock import inplace
-
 import pandas as pd
-import base64
-from io import BytesIO
 from dateutil.relativedelta import relativedelta
 from pandas.core.dtypes.inference import is_number
+from sqlalchemy import (
+    BigInteger,
+    String,
+    Table,
+    and_,
+    case,
+    column,
+    func,
+    literal,
+    select,
+    union,
+    values,
+)
 
 from dao.lib.da_graph import GraphBuilder
 from dao.prog.da_base import DaBase
 from dao.prog.utils import get_value_from_dict
-import math
-import json
-import itertools
-import logging
-from sqlalchemy import (
-    Table,
-    select,
-    func,
-    literal,
-    and_,
-    case,
-    true,
-    bindparam,
-    union_all,
-    String,
-    values,
-    column,
-    BigInteger,
-    union,
-)
-import matplotlib.pyplot as plt
-from sklearn.metrics import r2_score
 
 
 def calc_r2(serie_x: pd.Series, serie_y: pd.Series) -> float:
     if serie_x.count() < 24 or serie_y.count() < 24:
         return pd.NA
+    # imported here to speed up the runs which don't need it
+    from sklearn.metrics import r2_score
+
     return r2_score(serie_x, serie_y)
 
 
@@ -54,7 +53,7 @@ class Report(DaBase):
 
         self.report_options = self.config.report
         if self.report_options is None:
-            logging.error(f"Er zijn geen report-instellingen gevonden")
+            logging.error("Er zijn geen report-instellingen gevonden")
         self.make_periodes(_now=_now)
         _r = self.report_options
         self.grid_consumption_sensors = _r.entities_grid_consumption if _r else []
@@ -62,7 +61,8 @@ class Report(DaBase):
         self.battery_production_sensors = _r.entities_battery_production if _r else []
         self.battery_consumption_sensors = _r.entities_battery_consumption if _r else []
         self.solar_production_ac_sensors = _r.entities_solar_production_ac if _r else []
-        self.co2_intensity_sensor = _r.co2_intensity_sensor if _r else []
+        _co2 = _r.co2_intensity_sensor if _r else []
+        self.co2_intensity_sensor = [_co2] if type(_co2) is str else _co2 if type(_co2) is list else []
         self.ev_consumption_sensors = _r.entities_ev_consumption if _r else []
         self.wp_consumption_sensors = _r.entities_wp_consumption if _r else []
         self.boiler_consumption_sensors = _r.entities_boiler_consumption if _r else []
@@ -679,7 +679,7 @@ class Report(DaBase):
             for key in self.co2_graph_options["graphs"][graph_num]["series_keys"]:
                 serie = self.co2_dict[key]
                 serie["column"] = key
-                if not ("type" in serie):
+                if "type" not in serie:
                     serie["type"] = "stacked"
                 serie["title"] = serie["name"]
                 self.co2_graph_options["graphs"][graph_num]["series"].append(serie)
@@ -870,7 +870,6 @@ class Report(DaBase):
         tot = tot_g
         vanaf = tot + datetime.timedelta(days=-365)
         self.periodes.update(create_dict("365 dagen", vanaf, tot, "maand"))
-        return
 
     def get_time_border_ha_record(
             self, sensor: str, latest: bool = True
@@ -1403,7 +1402,6 @@ class Report(DaBase):
                 df_db.loc[df_db.shape[0]] = db_row
             print(df_db)
             self.db_da.savedata(df_db, tablename="values")
-        return
 
     def recalc_df_ha(self, org_data_df: pd.DataFrame, interval: str) -> pd.DataFrame:
         def get_datasoort(ds):
@@ -1506,7 +1504,7 @@ class Report(DaBase):
 
         if interval != "uur":
             agg_dict = {"vanaf": "min"}
-            for key, categorie in self.energy_balance_dict.items():
+            for key in self.energy_balance_dict:
                 agg_dict[key] = "sum"
             result = result.groupby([interval], as_index=False).agg(agg_dict)
 
@@ -2232,63 +2230,71 @@ class Report(DaBase):
                     last_moment = vanaf
                 df_prices = self.get_price_data(vanaf, last_moment, interval="1hour")
 
-            if source == "all" or source == "da":
-                if last_moment < tot:
-                    # get prognose consumption and production:
-                    prog_table = Table(
-                        "prognoses",
-                        self.db_da.metadata,
-                        autoload_with=self.db_da.engine,
+            if (source == "all" or source == "da") and last_moment < tot:
+                # get prognose consumption and production:
+                prog_table = Table(
+                    "prognoses",
+                    self.db_da.metadata,
+                    autoload_with=self.db_da.engine,
+                )
+                p1 = prog_table.alias("p1")
+                p2 = prog_table.alias("p2")
+                # Build the SQLAlchemy query
+                query = select(
+                    self.db_da.from_unixtime(p1.c.time).label("tijd"),
+                    p1.c.value.label("consumption"),
+                    p2.c.value.label("production"),
+                    literal("expected").label("datasoort"),
+                ).where(
+                    and_(
+                        p1.c.time == p2.c.time,
+                        p1.c.variabel == v1.c.id,
+                        v1.c.code == "cons",
+                        p2.c.variabel == v2.c.id,
+                        v2.c.code == "prod",
+                        p1.c.time
+                        >= self.db_da.unix_timestamp(
+                            last_moment.strftime("%Y-%m-%d %H:%M:%S")
+                        ),
+                        p1.c.time
+                        < self.db_da.unix_timestamp(
+                            tot.strftime("%Y-%m-%d %H:%M:%S")
+                        ),
                     )
-                    p1 = prog_table.alias("p1")
-                    p2 = prog_table.alias("p2")
-                    # Build the SQLAlchemy query
-                    query = select(
-                        self.db_da.from_unixtime(p1.c.time).label("tijd"),
-                        p1.c.value.label("consumption"),
-                        p2.c.value.label("production"),
-                        literal("expected").label("datasoort"),
-                    ).where(
-                        and_(
-                            p1.c.time == p2.c.time,
-                            p1.c.variabel == v1.c.id,
-                            v1.c.code == "cons",
-                            p2.c.variabel == v2.c.id,
-                            v2.c.code == "prod",
-                            p1.c.time
-                            >= self.db_da.unix_timestamp(
-                                last_moment.strftime("%Y-%m-%d %H:%M:%S")
-                            ),
-                            p1.c.time
-                            < self.db_da.unix_timestamp(
-                                tot.strftime("%Y-%m-%d %H:%M:%S")
-                            ),
-                        )
+                )
+
+                with self.db_da.engine.connect() as connection:
+                    query_str = str(query.compile(connection))
+                    logging.debug(f"query get prognose data:\n {query_str}")
+                    df_prog = pd.read_sql_query(query, connection)
+
+                df_prog.index = pd.to_datetime(df_prog["tijd"])
+                df_prog["datasoort"] = "expected"
+                if len(df_prog) > 0:
+                    df_prog_prices = self.get_price_data(
+                        last_moment, tot, interval=self.interval
                     )
-
-                    with self.db_da.engine.connect() as connection:
-                        query_str = str(query.compile(connection))
-                        logging.debug(f"query get prognose data:\n {query_str}")
-                        df_prog = pd.read_sql_query(query, connection)
-
-                    df_prog.index = pd.to_datetime(df_prog["tijd"])
-                    df_prog["datasoort"] = "expected"
-                    if len(df_prog) > 0:
-                        df_prog_prices = self.get_price_data(
-                            last_moment, tot, interval=self.interval
+                    if len(df_ha) == 0:
+                        df_ha = df_prog
+                        df_prices = df_prog_prices
+                    else:
+                        df_ha = pd.concat([df_ha, df_prog])
+                        df_prices.index = pd.to_datetime(df_prices["time"])
+                        df_prog_prices.index = pd.to_datetime(
+                            df_prog_prices["time"]
                         )
-                        if len(df_ha) == 0:
-                            df_ha = df_prog
-                            df_prices = df_prog_prices
-                        else:
-                            df_ha = pd.concat([df_ha, df_prog])
-                            df_prices.index = pd.to_datetime(df_prices["time"])
-                            df_prog_prices.index = pd.to_datetime(
-                                df_prog_prices["time"]
-                            )
-                            df_prices = pd.concat([df_prices, df_prog_prices])
+                        df_prices = pd.concat([df_prices, df_prog_prices])
 
             df_prices.rename(columns={"time": "tijd"}, inplace=True)
+            """
+            df_prices = df_prices.groupby(["tijd"], as_index=False).agg(
+                {
+                    "da_ex": "mean",
+                    "da_cons": "mean",
+                    "da_prod": "mean",
+                }
+            )
+            """
             df_prices.index = pd.to_datetime(df_prices["tijd"])
             df_ha = self.copy_col_df(df_prices, df_ha, "da_cons")
             df_ha = self.copy_col_df(df_prices, df_ha, "da_prod")
@@ -2336,8 +2342,8 @@ class Report(DaBase):
         """
         df_result = pd.DataFrame(columns=[rep_interval] + rep_columns)
         df_result[rep_interval] = df_input[rep_interval]
-        for column in rep_columns:
-            df_result[column] = df_input[column]
+        for report_column in rep_columns:
+            df_result[report_column] = df_input[report_column]
             # df_result[rep_columns] = df_input[rep_columns]
         df_result = self.agg_interval(calc_dict, df_result, rep_interval)
         if active_view == "tabel":
@@ -2350,10 +2356,7 @@ class Report(DaBase):
                     mean = df_result[key][:-1].mean()
                     df_result.at[df_result.index[-1], key] = mean
             header_col = []
-            if "with header" in calc_dict:
-                with_header = calc_dict["with header"]
-            else:
-                with_header = True
+            with_header = calc_dict.get("with header", True)
             if with_header:
                 header_col = [rep_interval.capitalize()]
                 name_col = [""]
@@ -2995,14 +2998,13 @@ class Report(DaBase):
             out_file = "../data/baseload/baseload_" + str(weekday) + ".json"
             with open(out_file, "w") as f:
                 print(json.dumps(baseload, indent=2), file=f)
-        return
 
     # ------------------------------------------------
     def get_field_data(self, field: str, periode: str, tot=None, dict=None):
         period = self.periodes[periode]
         if dict is None:
             dict = self.energy_balance_dict
-        if not (field in dict):
+        if field not in dict:
             result = None
             return result
         categorie = dict[field]
@@ -3065,7 +3067,7 @@ class Report(DaBase):
                 df = pd.concat([df, df_uur])
         return df, last_moment
 
-    def get_price_data(self, start, end, interval: str = "1hour"):
+    def get_price_data(self, start, end, interval: str = "1hour", extension=0):
         if interval == "1hour":
             agg_func = "avg"
         else:
@@ -3073,6 +3075,20 @@ class Report(DaBase):
         df_da = self.db_da.get_column_data(
             "values", "da", start=start, end=end, agg_func=agg_func
         )
+        if extension > 0:
+            if len(df_da) > 0:
+                last_moment = pd.to_datetime(df_da["time"].iloc[-1])
+                start = last_moment + datetime.timedelta(minutes=60 if interval == "1hour" else 15)
+            end = start + datetime.timedelta(hours=extension)
+            df_prediction = self.db_da.get_column_data(
+                "prognoses", "da", start=start, end=end, agg_func=agg_func
+            )
+            from dao.prog.utils import interpolate
+            if interval == "15min":
+                df_prediction["time"]= pd.to_datetime(df_prediction["time"])
+                df_prediction = interpolate(df_prediction, "value", time_field="time", quantity=False)
+                df_prediction["time"] = df_prediction["time"].dt.strftime('%Y-%m-%d %H:%M')
+            df_da = pd.concat([df_da, df_prediction])
         old_dagstr = ""
         taxes_l = 0
         taxes_t = 0
@@ -3105,7 +3121,7 @@ class Report(DaBase):
                         1 + btw_t / 100
                 )
             else:
-                da_prod = (row.value + ol_t) * (1 + btw_t / 100)
+                da_prod = (row.value * multiplier_t + ol_t) * (1 + btw_t / 100)
             df.loc[df.shape[0]] = [
                 datetime.datetime.strptime(row.time, "%Y-%m-%d %H:%M"),
                 row.value,
@@ -3298,7 +3314,7 @@ class Report(DaBase):
             )
         df_result["time"] = df_result["tijd"]
         df_result["datasoort"] = "expected"
-        # df_result["time_ts"] = df_result["time"].apply(lambda x: int(x.timestamp()))
+        df_result["time_ts"] = df_result["time"].apply(lambda x: int(x.timestamp()))
         df_result.drop("tijd", axis=1, inplace=True)
         df_result["time"] = df_result["time"].dt.tz_localize(None)
         df_result.index = df_result["time"]
@@ -3306,7 +3322,7 @@ class Report(DaBase):
 
     def get_api_data(self, field: str, _periode: str, cumulate: bool = False):
         periode = _periode.replace("_", " ")
-        if periode not in self.periodes.keys():
+        if periode not in self.periodes:
             result = f'{{"message": "Failed", "reason": "Periode: \'{_periode}\' is not allowed"}}'
             return result
 
@@ -3319,6 +3335,8 @@ class Report(DaBase):
             "netto_cost",
         ]
         tot = self.periodes[periode]["tot"]
+        if periode == "vandaag en morgen" and self.config.prices.prediction.extension>0:
+            tot = tot + datetime.timedelta(hours=self.config.prices.prediction.extension)
         df = pd.DataFrame()
         if field in ["grid"] + grid_fields:  # grid data
             df_grid = self.get_grid_data(periode, _tot=tot)
@@ -3339,7 +3357,7 @@ class Report(DaBase):
         elif field == "da":
             df = self.get_price_data(
                 self.periodes[periode]["vanaf"],
-                self.periodes[periode]["tot"],
+                tot,
                 self.interval,
             )
         elif field[0:3] == "soc":
@@ -3371,9 +3389,10 @@ class Report(DaBase):
             )
             return result
 
-        df["time"] = pd.to_datetime(df["time"])
-        df["time_ts"] = df["time"].dt.tz_localize(self.time_zone)
-        df["time"] = df["time"].apply(lambda x: x.strftime("%Y-%m-%d %H:%M"))
+        df["time_ts"] = pd.to_datetime(df["time"]).dt.tz_localize(self.time_zone)
+        df["time"] = df["time"].apply(
+            lambda x: x if isinstance(x, str) else x.strftime("%Y-%m-%d %H:%M")
+        )
         df.rename(columns={"datasoort": "datatype"}, inplace=True)
         cols = df.columns.tolist()
         cols = cols[-1:] + cols[:-1]
@@ -3573,30 +3592,58 @@ class Report(DaBase):
         if sensors_cte is None:
             return None
 
+        # Resolve metadata IDs before the statistics query so both database
+        # engines can use a range scan on (metadata_id, start_ts).
+        with self.db_ha.engine.connect() as connection:
+            metadata_ids = list(connection.execute(
+                select(statistics_meta.c.id).where(
+                    statistics_meta.c.statistic_id.in_(
+                        select(sensors_cte.c.sensor)
+                    )
+                )
+            ).scalars())
+
+        # DISTINCT prevents derived-table merging in MariaDB and flattening
+        # in SQLite. Including the primary key preserves every source row.
+        # Keep the inclusive end boundary used by the existing interval joins.
+        filtered_statistics = (
+            select(
+                statistics.c.id,
+                statistics.c.metadata_id,
+                statistics.c.start_ts,
+                statistics.c.sum,
+            )
+            .where(
+                statistics.c.metadata_id.in_(metadata_ids),
+                statistics.c.start_ts >= int(start.timestamp()),
+                statistics.c.start_ts <= int(end.timestamp()),
+            )
+            .distinct()
+            .cte("filtered_statistics")
+        )
+
         sensor_values_cte = (
             select(
                 intervals_cte.c.ts_start.label("ts"),
                 sensors_cte.c.code.label("code"),
                 sensors_cte.c.sensor.label("sensor"),
                 (
-                        (
-                                func.max(statistics.c.sum)
-                                - func.min(statistics.c.sum)
-                        )
+                    func.max(filtered_statistics.c.sum)
+                    - func.min(filtered_statistics.c.sum)
                 ).label("sensor_value"),
             )
             .select_from(
                 intervals_cte
                 .join(
-                    statistics,
+                    filtered_statistics,
                     and_(
-                        statistics.c.start_ts >= intervals_cte.c.ts_start,
-                        statistics.c.start_ts <= intervals_cte.c.ts_end,
+                        filtered_statistics.c.start_ts >= intervals_cte.c.ts_start,
+                        filtered_statistics.c.start_ts <= intervals_cte.c.ts_end,
                     ),
                 )
                 .join(
                     statistics_meta,
-                    statistics_meta.c.id == statistics.c.metadata_id,
+                    statistics_meta.c.id == filtered_statistics.c.metadata_id,
                 )
                 .join(
                     sensors_cte,

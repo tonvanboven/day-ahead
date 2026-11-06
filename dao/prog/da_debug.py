@@ -42,16 +42,19 @@ snapshot to get a solved model plus its registry.
 from __future__ import annotations
 
 import argparse
+import copy
 import datetime as dt
 import hashlib
 import io
 import json
 import logging
 import math
+import os
 import subprocess
 import sys
+import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import pandas as pd
 
@@ -62,16 +65,32 @@ except ImportError:  # pragma: no cover - mip is a hard project dependency,
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 1
+# 2: price_data/prog_data are recorded per call (price_data_calls,
+# prog_data_calls) instead of as one frame. Schema-1 snapshots still replay.
+# 3: the ML solar forecast is recorded per call and per device
+# (solar_prediction_calls) instead of one frame per device. With a horizon
+# extension each device is asked twice. Older snapshots still replay.
+SCHEMA_VERSION = 3
 SCHEMA_MIN_SUPPORTED = 1
 
 REDACTED_SECRET = "<redacted:SecretStr>"
 
 
-class SnapshotMiss(RuntimeError):
+class SnapshotMiss(BaseException):
     """Raised by ReplayIO when a replayed run asks for input the snapshot
     does not have. Never caught internally — a stale or incomplete fixture
-    must fail loudly, not silently fall back to live/default behaviour."""
+    must fail loudly, not silently fall back to live/default behaviour.
+
+    Derives from BaseException, not Exception: calc_optimum() wraps many
+    reads in a broad ``except Exception`` with a default (battery SoC falls
+    back to 50%), which would otherwise turn a miss into a silently
+    different model. Catch it by name."""
+
+
+class RecordedReadError(RuntimeError):
+    """Replays a read that also failed during capture (for example an HA
+    entity that returned 404). calc_optimum() handles it the same way it
+    handled the original error, so the replay takes the same fallback."""
 
 
 # ---------------------------------------------------------------------------
@@ -90,9 +109,11 @@ def _sanitize_config_value(value: Any) -> Any:
     have coerced it to a plain ``str`` and lost the type identity needed to
     tell a secret field apart from an ordinary one.
     """
-    from dao.prog.config.models.base import SecretStr
-    from pydantic import BaseModel
     from enum import Enum
+
+    from pydantic import BaseModel
+
+    from dao.prog.config.models.base import SecretStr
 
     if isinstance(value, SecretStr):
         return REDACTED_SECRET
@@ -133,7 +154,7 @@ def _rehydrate_config(sanitized: dict):
     as a plain literal and returns it as-is; nothing that needs a *working*
     secret is reachable during a patched replay (price/HP-hours lookups are
     replaced wholesale before they would ever call out with one)."""
-    from dao.prog.config.loader import VERSION_MODELS, CURRENT_VERSION
+    from dao.prog.config.loader import CURRENT_VERSION, VERSION_MODELS
 
     version = sanitized.get("config_version", CURRENT_VERSION)
     model_class = VERSION_MODELS.get(version, VERSION_MODELS[CURRENT_VERSION])
@@ -191,15 +212,23 @@ def _dataframe_from_payload(payload: dict) -> pd.DataFrame:
             continue
         try:
             if dtype.startswith("datetime64"):
-                df[col] = pd.to_datetime(df[col])
+                values = pd.to_datetime(df[col])
+                # to_json schrijft tz-aware tijden als UTC ("...Z"); zet ze terug
+                # naar de opgeslagen zone, anders verschuift elke lokale vergelijking.
+                tz = getattr(pd.api.types.pandas_dtype(dtype), "tz", None)
+                if tz is not None:
+                    if values.dt.tz is None:
+                        values = values.dt.tz_localize("UTC")
+                    values = values.dt.tz_convert(tz)
+                df[col] = values
             else:
                 df[col] = df[col].astype(dtype)
         except (TypeError, ValueError) as ex:
             logger.warning("Kon dtype %s van kolom %s niet herstellen: %s", dtype, col, ex)
     # Only coerce the index to datetime if it genuinely was one — blindly
     # doing this for every non-empty frame (the original bug) silently
-    # corrupted plain integer/RangeIndex frames, e.g. solar_predictions'
-    # results, which have no datetime index at all.
+    # corrupted plain integer/RangeIndex frames, e.g. the ML solar
+    # forecasts, which have no datetime index at all.
     if payload.get("index_is_datetime"):
         df.index = pd.to_datetime(df.index)
     df.index.name = payload.get("index_name")
@@ -213,6 +242,114 @@ def _call_key(args: tuple, kwargs: dict) -> str:
     legitimately be invoked more than once with different arguments
     (``get_calculated_baseload(weekday)``, ``get_heatpump_run_hours(entity)``)."""
     return json.dumps([list(args), sorted(kwargs.items())], default=str, sort_keys=True)
+
+
+# Argumenten die bij een call-sequence channel moeten overeenkomen tussen opname en
+# replay. Tijdstippen (start/end) horen er bewust niet bij: die volgen uit
+# calc_optimum()'s eigen dt.datetime.now() en kunnen over een intervalgrens
+# verschuiven, zie het predict_solar_device-kanaal.
+_SEQUENCE_MATCH_ARGS = ("interval", "extension")
+
+
+class _CallSequence:
+    """Replay side of a channel that ``calc_optimum()`` calls several times
+    with different windows: ``Report.get_price_data`` (fixed day-ahead part,
+    then the predicted extension) and ``get_prognose_data`` (the same two
+    parts, plus one call per solar device from ``calc_solar_predictions``),
+    and ``SolarPredictor.predict_solar_device`` per device (fixed part and
+    predicted part, one sequence per device).
+
+    Recorded calls are served in call order. The n-th replayed call gets the
+    n-th recorded frame, after a check that ``interval`` and ``extension``
+    agree. A different call count or a mismatch raises ``SnapshotMiss``;
+    ``check_consumed`` catches recordings left unused.
+
+    A schema-1 snapshot holds one frame per channel. That frame is served
+    for every call, which is what replay always did before schema 2."""
+
+    def __init__(self, channel: str, source: str, records: list | None, legacy: pd.DataFrame | None = None):
+        self._channel = channel
+        self._source = source
+        self._records = [
+            (rec.get("args") or {}, _dataframe_from_payload(rec["data"]))
+            for rec in (records or [])
+        ]
+        self._legacy = legacy
+        self._next = 0
+
+    # Het eerste opgenomen frame; voor de dump-header, die alleen het vaste deel nodig heeft.
+    @property
+    def first(self) -> pd.DataFrame | None:
+        if self._records:
+            return self._records[0][1]
+        return self._legacy
+
+    # Levert het volgende opgenomen frame en faalt hard bij een afwijkende aanroep.
+    def serve(self, **args) -> pd.DataFrame:
+        if not self._records:
+            if self._legacy is None:
+                raise SnapshotMiss(f"ReplayIO ({self._source}): snapshot has no {self._channel}.")
+            return self._legacy.copy()
+        n = self._next
+        if n >= len(self._records):
+            raise SnapshotMiss(
+                f"ReplayIO ({self._source}): {self._channel} call #{n + 1} "
+                f"{args} has no recording; the snapshot holds "
+                f"{len(self._records)} call(s)."
+            )
+        recorded_args, frame = self._records[n]
+        for name in _SEQUENCE_MATCH_ARGS:
+            if name in recorded_args and str(recorded_args[name]) != str(args.get(name)):
+                raise SnapshotMiss(
+                    f"ReplayIO ({self._source}): {self._channel} call #{n + 1} "
+                    f"has {name}={args.get(name)!r}, the recording has "
+                    f"{recorded_args[name]!r}. calc_optimum() now calls this "
+                    f"channel in a different order or with different arguments."
+                )
+        self._next += 1
+        return frame.copy()
+
+    # Faalt hard als er opgenomen aanroepen over zijn; een schema-1-frame telt niet.
+    def check_consumed(self) -> None:
+        left = len(self._records) - self._next
+        if left > 0:
+            raise SnapshotMiss(
+                f"ReplayIO ({self._source}): {self._channel} served "
+                f"{self._next} of {len(self._records)} recorded call(s). "
+                f"calc_optimum() now skips a call the recorded run made."
+            )
+
+
+# Bouwt per paneel de call sequence van de ML-zonnevoorspelling, ook uit een oudere snapshot.
+def _solar_call_sequences(snapshot: dict, source: str) -> dict[str, _CallSequence]:
+    """Schema 3 holds ``solar_prediction_calls`` ({device: [records]}).
+    Older snapshots hold ``solar_predictions``, one frame per device keyed
+    by ``_call_key((name,), {})``; that frame is served for every call, as
+    replay did before."""
+    sequences: dict[str, _CallSequence] = {}
+    for name, records in (snapshot.get("solar_prediction_calls") or {}).items():
+        sequences[name] = _CallSequence(f"solar prediction {name!r}", source, records)
+    for key, payload in (snapshot.get("solar_predictions") or {}).items():
+        name = json.loads(key)[0][0]
+        if name not in sequences:
+            sequences[name] = _CallSequence(
+                f"solar prediction {name!r}", source, None, _dataframe_from_payload(payload)
+            )
+    return sequences
+
+
+# Leest het enkele frame uit een schema-1-snapshot, of None als dat er niet is.
+def _legacy_frame(snapshot: dict, channel: str) -> pd.DataFrame | None:
+    payload = snapshot.get(channel)
+    return _dataframe_from_payload(payload) if payload is not None else None
+
+
+# Zet een opgenomen aanroep om naar het snapshot-formaat van een call-sequence channel.
+def _sequence_record(args: dict, frame: pd.DataFrame) -> dict:
+    return {
+        "args": {k: (None if v is None else str(v)) for k, v in args.items()},
+        "data": _dataframe_to_payload(frame),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -244,7 +381,7 @@ class _FakeHttpResponse:
     on the result. Supporting all three keeps both call sites served by one
     small stand-in."""
 
-    __slots__ = ("_payload", "text", "ok", "status_code")
+    __slots__ = ("_payload", "ok", "status_code", "text")
 
     # Bouwt een minimale requests.Response-imitatie met .text/.ok/.status_code, 
     # nodig om zowel da_base.py's eigen HA-aanroep als hassapi's interne verzoek te kunnen bedienen.
@@ -269,18 +406,14 @@ class _FakeDbManager:
     ``calc_optimum()`` reads from the database somewhere this module
     doesn't patch yet, and needs a real patch added."""
 
-    # Onthoudt de opgeslagen prognosedata en een label voor duidelijke foutmeldingen.
-    def __init__(self, prog_data: Optional[pd.DataFrame], label: str):
-        self._prog_data = prog_data
+    # Onthoudt de opgenomen prognose-aanroepen en een label voor duidelijke foutmeldingen.
+    def __init__(self, prog_calls: _CallSequence, label: str):
+        self._prog_calls = prog_calls
         self._label = label
 
-    # Levert de opgeslagen prognosedata terug in plaats van een echte databasequery uit te voeren.
+    # Levert de volgende opgenomen prognosedata terug in plaats van een echte databasequery uit te voeren.
     def get_prognose_data(self, start=None, end=None, interval="1hour"):
-        if self._prog_data is None:
-            raise SnapshotMiss(
-                f"ReplayIO ({self._label}): prog_data not present in snapshot"
-            )
-        return self._prog_data.copy()
+        return self._prog_calls.serve(start=start, end=end, interval=interval)
 
     # Doet niets; bestaat alleen omdat DaBase.__init__ dit aanroept en anders een AttributeError zou geven.
     def log_pool_status(self):
@@ -353,13 +486,14 @@ def _import_targets():
     object under a different ``sys.modules`` key, with its own distinct
     ``Report`` class — patching that copy would silently do nothing to the
     class day_ahead.py actually constructs."""
+    import dao.prog.da_base as da_base_module
+    from dao.lib.da_meteo import Meteo
+    from dao.lib.db_manager import DBmanagerObj
     from dao.prog.da_base import DaBase
     from dao.prog.da_report import Report
-    from dao.lib.db_manager import DBmanagerObj
     from dao.prog.solar_predictor import SolarPredictor
-    import dao.prog.da_base as da_base_module
 
-    return DaBase, Report, DBmanagerObj, SolarPredictor, da_base_module
+    return DaBase, Report, DBmanagerObj, SolarPredictor, Meteo, da_base_module
 
 
 # ---------------------------------------------------------------------------
@@ -376,7 +510,6 @@ def _make_noop_set_value(label: str):
     # Logt de onderdrukte write en geeft None terug in plaats van echt naar HA te schrijven.
     def _noop_set_value(instance, entity_id, value):
         logger.debug("%s: onderdrukt write set_value(%s, %s)", label, entity_id, value)
-        return None
 
     return _noop_set_value
 
@@ -386,7 +519,6 @@ def _make_noop_call_service(label: str):
     # Onderdrukt een service-aanroep naar HA.
     def _noop_call_service(instance, *args, **kwargs):
         logger.debug("%s: onderdrukt write call_service%s %s", label, args, kwargs)
-        return None
 
     return _noop_call_service
 
@@ -396,7 +528,6 @@ def _make_noop_savefig(label: str):
     # Doet niets in plaats van een bestand op schijf te zetten.
     def _noop_savefig(*args, **kwargs):
         logger.debug("%s: onderdrukt write plt.savefig%s", label, args)
-        return None
 
     return _noop_savefig
 
@@ -410,7 +541,7 @@ def _make_noop_savefig(label: str):
 
 # Omwikkelt day_ahead.py's fd-omleiding zodat de CBC-solverlog altijd wordt vastgelegd, 
 # ook als self.debug uit staat.
-def _install_cbc_log_capture(patches: "_PatchList", day_ahead_module, target) -> None:
+def _install_cbc_log_capture(patches: _PatchList, day_ahead_module, target) -> None:
     """Wraps day_ahead.py's fd-redirecting ``_capture_native_stdout()`` so
     the CBC solve text lands in ``target._cbc_log_chunks`` unconditionally —
     day_ahead.py only *logs* it when ``self.debug or log_level <= DEBUG``,
@@ -433,7 +564,7 @@ def _install_cbc_log_capture(patches: "_PatchList", day_ahead_module, target) ->
 
 
 # Onthoudt een referentie naar het opgeloste mip.Model na elke optimize()-aanroep, want buiten calc_optimum() is dat model anders nergens meer te zien.
-def _install_model_capture(patches: "_PatchList", target) -> None:
+def _install_model_capture(patches: _PatchList, target) -> None:
     """Records a reference to the ``mip.Model`` instance after each
     ``optimize()`` call, so objective/status/gap are readable afterward —
     without this, nothing outside ``calc_optimum()`` can see the solved
@@ -452,7 +583,7 @@ def _install_model_capture(patches: "_PatchList", target) -> None:
 
 
 # Zet een opgelost model om naar een result-dict, gedeeld door RecordingIO en ReplayIO zodat beide dezelfde vorm opleveren om te diffen.
-def _build_result_dict(model, cbc_log_chunks: list[str], extra_meta: dict) -> Optional[dict]:
+def _build_result_dict(model, cbc_log_chunks: list[str], extra_meta: dict) -> dict | None:
     if model is None:
         return None
     try:
@@ -532,23 +663,25 @@ class RecordingIO:
         self._png = png
         self._patches = _PatchList()
         self._primary = None  # first DaBase-family instance constructed
-        self._price_data: Optional[pd.DataFrame] = None
-        self._price_data_args: Optional[dict] = None
-        self._prog_data: Optional[pd.DataFrame] = None
+        self._price_calls: list[dict] = []
+        self._prog_calls: list[dict] = []
         self._ha_states: dict[str, str] = {}
+        self._ha_state_errors: dict[str, str] = {}
+        self._calc_overrides: dict | None = None
         self._baseload: dict[str, list] = {}
         self._heatpump_run_hours: dict[str, float] = {}
-        self._solar_predictions: dict[str, pd.DataFrame] = {}
+        self._avg_temperature: dict[str, float] = {}
+        self._solar_calls: dict[str, list[dict]] = {}
         self._captured_at = dt.datetime.now()
         self._model = None  # last mip.Model.optimize() was called on
         self._cbc_log_chunks: list[str] = []
-        self.snapshot_path: Optional[Path] = None
-        self.result_path: Optional[Path] = None
+        self.snapshot_path: Path | None = None
+        self.result_path: Path | None = None
 
     # -- context manager -----------------------------------------------
 
     # Installeert de patches bij het binnengaan van de with-blok.
-    def __enter__(self) -> "RecordingIO":
+    def __enter__(self) -> RecordingIO:
         self._install_patches()
         return self
 
@@ -568,7 +701,7 @@ class RecordingIO:
 
     # Zet alle class- en module-patches voor deze opnamesessie neer; dekt samen alle kanalen uit sectie 1 van het ontwerp.
     def _install_patches(self) -> None:
-        DaBase, Report, DBmanagerObj, SolarPredictor, _da_base_module = _import_targets()
+        DaBase, Report, DBmanagerObj, SolarPredictor, Meteo, _da_base_module = _import_targets()
 
         original_init = DaBase.__init__
 
@@ -596,16 +729,27 @@ class RecordingIO:
         # doesn't need debug mode too.
         if not self._png:
             import matplotlib.pyplot as plt
+            from matplotlib.figure import Figure
 
             self._patches.set(
                 plt, "savefig", _make_noop_savefig(f"RecordingIO({self.out_dir})")
+            )
+            self._patches.set(
+                Figure, "savefig", _make_noop_savefig(f"RecordingIO({self.out_dir})")
             )
 
         original_get_state = DaBase.get_state
 
         # Roept de echte get_state aan en legt de teruggegeven state vast onder de entity-id.
         def _wrapped_get_state(instance, entity_id, *args, **kwargs):
-            result = original_get_state(instance, entity_id, *args, **kwargs)
+            try:
+                result = original_get_state(instance, entity_id, *args, **kwargs)
+            except Exception as ex:
+                # Ook een mislukte read vastleggen: calc_optimum() valt dan
+                # terug op een default, en de replay moet dezelfde fout geven
+                # in plaats van een SnapshotMiss.
+                self._ha_state_errors[entity_id] = f"{type(ex).__name__}: {ex}"
+                raise
             try:
                 self._ha_states[entity_id] = result.state
             except AttributeError:
@@ -626,15 +770,19 @@ class RecordingIO:
 
         original_get_price_data = Report.get_price_data
 
-        # Roept Report.get_price_data echt aan en bewaart het teruggegeven DataFrame.
-        def _wrapped_get_price_data(instance, start, end=None, interval="1hour"):
-            result = original_get_price_data(instance, start, end=end, interval=interval)
-            self._price_data = result
-            self._price_data_args = {
-                "start": str(start),
-                "end": str(end),
-                "interval": interval,
-            }
+        # Roept Report.get_price_data echt aan en bewaart elke aanroep op volgorde:
+        # met een prijsvoorspelling (extension > 0) zijn het er twee.
+        def _wrapped_get_price_data(instance, start, end=None, interval="1hour", extension=0):
+            # Vroege meting: de prijzen zijn het eerste invoerkanaal, dus ook
+            # een run die vóór de solve afbreekt heeft dan zijn startwaarden.
+            self._record_calc_overrides()
+            result = original_get_price_data(
+                instance, start, end=end, interval=interval, extension=extension
+            )
+            self._price_calls.append(_sequence_record(
+                {"start": start, "end": end, "interval": interval, "extension": extension},
+                result,
+            ))
             return result
 
         self._patches.set(Report, "get_price_data", _wrapped_get_price_data)
@@ -649,12 +797,35 @@ class RecordingIO:
 
         self._patches.set(Report, "get_heatpump_run_hours", _wrapped_hp_hours)
 
+        # A channel found the same way predict_solar_device was (see the
+        # comment below): calc_optimum()'s heating block calls
+        # self.meteo.calc_graaddagen(weighted=True) unconditionally once the
+        # heat pump is enabled, which falls through to
+        # Meteo.get_avg_temperature() — a live SQLAlchemy query DBmanagerObj's
+        # patch above never sees, because it only runs inside this method.
+        # Patched wholesale, same principle as get_price_data/
+        # get_heatpump_run_hours; keyed by call args since calc_graaddagen
+        # calls it once for "today" (date=None) and, on a horizon longer
+        # than a day, again for "tomorrow" (an explicit date).
+        original_avg_temperature = Meteo.get_avg_temperature
+
+        # Roept de echte temperatuurquery aan en onthoudt het resultaat per argumentcombinatie (vandaag/morgen).
+        def _wrapped_avg_temperature(instance, *args, **kwargs):
+            result = original_avg_temperature(instance, *args, **kwargs)
+            self._avg_temperature[_call_key(args, kwargs)] = result
+            return result
+
+        self._patches.set(Meteo, "get_avg_temperature", _wrapped_avg_temperature)
+
         original_get_prognose_data = DBmanagerObj.get_prognose_data
 
-        # Roept de echte prognosedata-query aan en bewaart het resultaat.
+        # Roept de echte prognosedata-query aan en bewaart elke aanroep op volgorde
+        # (vast deel, voorspeld deel, en per zonnepaneel uit calc_solar_predictions).
         def _wrapped_get_prognose_data(instance, start=None, end=None, interval="1hour"):
             result = original_get_prognose_data(instance, start=start, end=end, interval=interval)
-            self._prog_data = result
+            self._prog_calls.append(_sequence_record(
+                {"start": start, "end": end, "interval": interval}, result
+            ))
             return result
 
         self._patches.set(DBmanagerObj, "get_prognose_data", _wrapped_get_prognose_data)
@@ -670,21 +841,19 @@ class RecordingIO:
         # DB primitives generically.
         original_predict_solar_device = SolarPredictor.predict_solar_device
 
-        # Roept de echte ML-zonnevoorspelling aan en bewaart het resultaat per paneelnaam, niet per tijdvenster, want dat laatste kan meer drift geven dan bedoeld.
+        # Roept de echte ML-zonnevoorspelling aan en bewaart elke aanroep op volgorde, per paneel.
         def _wrapped_predict_solar_device(instance, solar_option, start, end):
             result = original_predict_solar_device(instance, solar_option, start, end)
-            # Keyed by device name only, not (start, end): those two are
-            # themselves derived from calc_optimum()'s own internal
-            # dt.datetime.now() call, which fires strictly later than (and
-            # therefore can drift from) RecordingIO's own captured_at
-            # timestamp — a live run's DB/HA setup alone can take long
-            # enough to cross an interval boundary between the two. There
-            # is only ever one legitimate (start, end) window per device
-            # per snapshot anyway, so the name alone is both sufficient
-            # and immune to that drift. Found by an actual capture/replay
-            # round trip against a live config, not by reasoning about it.
-            key = _call_key((getattr(solar_option, "name", None),), {})
-            self._solar_predictions[key] = result
+            # One call sequence per device name. With a horizon extension
+            # calc_optimum() asks every device twice (fixed part, then the
+            # predicted part), so one frame per device loses the first one.
+            # start/end are recorded but not matched on replay: they come
+            # from calc_optimum()'s own dt.datetime.now(), which can drift
+            # from the frozen replay clock across an interval boundary.
+            name = getattr(solar_option, "name", None)
+            self._solar_calls.setdefault(name, []).append(
+                _sequence_record({"start": start, "end": end}, result)
+            )
             return result
 
         self._patches.set(SolarPredictor, "predict_solar_device", _wrapped_predict_solar_device)
@@ -699,8 +868,8 @@ class RecordingIO:
         # returns a few lines into the real method. This patch narrows that
         # gap to essentially the wrapper call overhead.
         try:
-            from dao.prog.day_ahead import DaCalc
             import dao.prog.day_ahead as day_ahead_module
+            from dao.prog.day_ahead import DaCalc
 
             original_calc_optimum = DaCalc.calc_optimum
 
@@ -720,10 +889,28 @@ class RecordingIO:
 
         _install_model_capture(self._patches, self)
 
+        # Leest de startwaarden opnieuw op het moment van de solve; dit zijn
+        # precies de waarden waarmee het model is opgebouwd.
+        if mip is not None:
+            captured_optimize = mip.Model.optimize
+
+            # Legt de startwaarden vast en roept daarna de solver aan.
+            def _optimize_with_overrides(model_self, *args, **kwargs):
+                self._record_calc_overrides()
+                return captured_optimize(model_self, *args, **kwargs)
+
+            self._patches.set(mip.Model, "optimize", _optimize_with_overrides)
+
+    # Bewaart de startwaarden van de lopende calc_optimum()-aanroep, als die er is.
+    def _record_calc_overrides(self) -> None:
+        overrides = _calc_overrides_from_stack()
+        if overrides is not None:
+            self._calc_overrides = overrides
+
     # -- snapshot writing --------------------------------------------------
 
     # Bouwt en schrijft het snapshot-bestand met alle vastgelegde kanalen, inclusief de geheimencontrole vlak vóór het schrijven.
-    def _write_snapshot(self, exc: Optional[BaseException]) -> None:
+    def _write_snapshot(self, exc: BaseException | None) -> None:
         if self._primary is None:
             logger.warning(
                 "RecordingIO: geen DaBase-instantie geconstrueerd binnen de "
@@ -747,6 +934,7 @@ class RecordingIO:
             "git_sha": _git_sha(),
             "mip_version": getattr(mip, "__version__", None) if mip else None,
             "python_version": sys.version.split()[0],
+            "tz_name": _local_tz_name(),
             "config_hash": _config_hash(sanitized_config),
             "file_name": getattr(self._primary, "file_name", None),
             "exception": f"{type(exc).__name__}: {exc}" if exc is not None else None,
@@ -765,19 +953,15 @@ class RecordingIO:
         snapshot = {
             "meta": meta,
             "ha_context": ha_context,
-            "price_data": _dataframe_to_payload(self._price_data)
-            if self._price_data is not None
-            else None,
-            "price_data_args": self._price_data_args,
-            "prog_data": _dataframe_to_payload(self._prog_data)
-            if self._prog_data is not None
-            else None,
+            "price_data_calls": self._price_calls,
+            "prog_data_calls": self._prog_calls,
+            "calc_overrides": _overrides_to_payload(self._calc_overrides),
             "ha_states": self._ha_states,
+            "ha_state_errors": self._ha_state_errors,
             "baseload": self._baseload,
             "heatpump_run_hours": self._heatpump_run_hours,
-            "solar_predictions": {
-                key: _dataframe_to_payload(df) for key, df in self._solar_predictions.items()
-            },
+            "avg_temperature": self._avg_temperature,
+            "solar_prediction_calls": self._solar_calls,
             "config": sanitized_config,
         }
 
@@ -811,7 +995,7 @@ class RecordingIO:
 
 
 # Leest de addon-versie uit dao/prog/version.py, nodig om een snapshot te kunnen koppelen aan de code die hem produceerde.
-def _dao_version() -> Optional[str]:
+def _dao_version() -> str | None:
     try:
         from dao.prog.version import __version__
 
@@ -821,7 +1005,7 @@ def _dao_version() -> Optional[str]:
 
 
 # Leest de huidige git-commit als optioneel extra herkenningspunt voor ontwikkelbuilds.
-def _git_sha() -> Optional[str]:
+def _git_sha() -> str | None:
     try:
         out = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
@@ -835,6 +1019,139 @@ def _git_sha() -> Optional[str]:
     except Exception:
         pass
     return None
+
+
+# Bepaalt de IANA-tijdzone van dit proces, zodat een replay in dezelfde zone rekent als de capture.
+def _local_tz_name() -> str | None:
+    """IANA name of the process-local timezone, or None if it can't be
+    determined. calc_optimum() works in naive local datetimes, so a replay
+    must run in the same zone as the capture did."""
+    from zoneinfo import ZoneInfo
+
+    candidates = []
+    tz_env = os.environ.get("TZ")
+    if tz_env:
+        candidates.append(tz_env.lstrip(":"))
+    try:
+        candidates.append(Path("/etc/timezone").read_text().strip())
+    except OSError:
+        pass
+    try:
+        target = str(Path("/etc/localtime").resolve())
+        if "zoneinfo/" in target:
+            candidates.append(target.split("zoneinfo/", 1)[1])
+    except OSError:
+        pass
+    for name in candidates:
+        if "zoneinfo/" in name:
+            name = name.split("zoneinfo/", 1)[1]
+        try:
+            ZoneInfo(name)
+        except Exception:  # noqa: BLE001 - not a usable zone name, try the next
+            continue
+        return name
+    return None
+
+
+# Zet de startwaarden die calc_optimum() echt gebruikte om naar JSON.
+def _overrides_to_payload(overrides: dict | None) -> dict:
+    return {
+        k: (v.isoformat() if isinstance(v, dt.datetime) else v)
+        for k, v in (overrides or {}).items()
+    }
+
+
+# Zet vastgelegde startwaarden terug naar de argumenten van calc_optimum().
+def _overrides_from_payload(payload: dict | None) -> dict:
+    overrides = dict(payload or {})
+    if overrides.get("_start_dt") is not None:
+        overrides["_start_dt"] = dt.datetime.fromisoformat(overrides["_start_dt"])
+    return overrides
+
+
+_CALC_OVERRIDE_NAMES = ("_start_dt", "_start_soc", "_start_ev_soc")
+
+
+# Leest de startwaarden uit het lopende calc_optimum()-frame, zodat ook hard ingevulde waarden worden vastgelegd.
+def _calc_overrides_from_stack() -> dict | None:
+    """Return the _start_dt/_start_soc/_start_ev_soc values that the running
+    calc_optimum() call is using, read from its frame, or None when not
+    called from inside calc_optimum(). Reading the frame (instead of the
+    call's arguments) also catches values hard-coded at the top of the
+    method, without changing day_ahead.py."""
+    frame = sys._getframe(1)
+    try:
+        while frame is not None:
+            code = frame.f_code
+            if code.co_name == "calc_optimum" and code.co_filename.endswith("day_ahead.py"):
+                values = frame.f_locals
+                return {
+                    name: values[name]
+                    for name in _CALC_OVERRIDE_NAMES
+                    if values.get(name) is not None
+                }
+            frame = frame.f_back
+        return None
+    finally:
+        del frame
+
+
+# Laat het proces tijdelijk in een andere tijdzone rekenen; geeft een functie terug die dat herstelt.
+def _set_process_tz(tz_name: str):
+    """Point the process-local timezone at ``tz_name`` and return a function
+    that restores the previous setting. POSIX only (time.tzset); elsewhere
+    this is a no-op and the replay keeps the machine's own zone."""
+    if not hasattr(time, "tzset"):
+        return lambda: None
+    previous = os.environ.get("TZ")
+    os.environ["TZ"] = tz_name
+    time.tzset()
+
+    # Herstelt de tijdzone van vóór de replay.
+    def restore():
+        if previous is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = previous
+        time.tzset()
+
+    return restore
+
+
+# Laat freezegun naive datetimes als lokale tijd omrekenen, net als de echte datetime.
+def _patch_fake_datetime_local(patches: _PatchList) -> None:
+    """freezegun converts naive datetimes with one fixed offset (UTC unless
+    ``tz_offset`` is given), while the real datetime uses the process zone,
+    including DST. calc_optimum() round-trips naive datetimes through
+    timestamp()/fromtimestamp(), and a datetime created before the clock was
+    frozen is a real one, so the two rules disagree by the UTC offset. These
+    overrides make the fake class follow the process zone as well. Must run
+    before freeze_time().start(), which picks up fake_localtime then."""
+    import freezegun.api as freezegun_api
+    from freezegun.api import FakeDatetime, datetime_to_fakedatetime, real_datetime
+
+    original_timestamp = FakeDatetime.timestamp
+
+    # Rekent een naive datetime om met de lokale zone van het proces.
+    def timestamp(self):
+        if self.tzinfo is None:
+            return real_datetime(
+                self.year, self.month, self.day, self.hour, self.minute,
+                self.second, self.microsecond, fold=self.fold,
+            ).timestamp()
+        return original_timestamp(self)
+
+    # Zet een epoch-tijd om naar een naive lokale datetime, zoals de echte fromtimestamp.
+    def fromtimestamp(cls, t, tz=None):
+        return datetime_to_fakedatetime(real_datetime.fromtimestamp(t, tz))
+
+    # freezegun's eigen versie trekt alleen time.timezone af en negeert zomertijd.
+    def fake_localtime(t=None):
+        return freezegun_api.real_localtime(freezegun_api.fake_time() if t is None else t)
+
+    patches.set(FakeDatetime, "timestamp", timestamp)
+    patches.set(FakeDatetime, "fromtimestamp", classmethod(fromtimestamp))
+    patches.set(freezegun_api, "fake_localtime", fake_localtime)
 
 
 # ---------------------------------------------------------------------------
@@ -858,7 +1175,7 @@ class ReplayIO:
         self,
         snapshot: str | Path | dict,
         *,
-        solver_threads: Optional[int] = None,
+        solver_threads: int | None = None,
         png: bool = False,
     ):
         """``solver_threads=None`` (the default) replays with the same
@@ -887,12 +1204,14 @@ class ReplayIO:
         if isinstance(snapshot, dict):
             self._snapshot = snapshot
         else:
-            with open(snapshot, "r", encoding="utf-8") as f:
+            with open(snapshot, encoding="utf-8") as f:
                 self._snapshot = json.load(f)
         self._patches = _PatchList()
         self._primary = None
         self._reads: set[str] = set()
+        self._post_solve_misses: set[str] = set()
         self._freeze = None  # freezegun handle, set in _install_patches
+        self._restore_tz = None  # set when _install_patches changes the process TZ
         self._model = None  # last mip.Model.optimize() was called on
         self._cbc_log_chunks: list[str] = []
 
@@ -915,25 +1234,33 @@ class ReplayIO:
                 current_version,
             )
 
-        self._price_data = (
-            _dataframe_from_payload(self._snapshot["price_data"])
-            if self._snapshot.get("price_data") is not None
-            else None
+        self._price_calls = _CallSequence(
+            "price_data", self._source,
+            self._snapshot.get("price_data_calls"),
+            _legacy_frame(self._snapshot, "price_data"),
         )
-        self._prog_data = (
-            _dataframe_from_payload(self._snapshot["prog_data"])
-            if self._snapshot.get("prog_data") is not None
-            else None
+        self._prog_calls = _CallSequence(
+            "prog_data", self._source,
+            self._snapshot.get("prog_data_calls"),
+            _legacy_frame(self._snapshot, "prog_data"),
         )
+        # Vaste deel van de prijsdata, voor de dump-header.
+        self._price_data = self._price_calls.first
         self._ha_states: dict[str, str] = self._snapshot.get("ha_states", {})
+        self._ha_state_errors: dict[str, str] = self._snapshot.get("ha_state_errors", {})
+        self._calc_overrides: dict = _overrides_from_payload(
+            self._snapshot.get("calc_overrides")
+        )
         self._baseload: dict[str, list] = self._snapshot.get("baseload", {})
         self._heatpump_run_hours: dict[str, float] = self._snapshot.get(
             "heatpump_run_hours", {}
         )
-        self._solar_predictions: dict[str, pd.DataFrame] = {
-            key: _dataframe_from_payload(payload)
-            for key, payload in self._snapshot.get("solar_predictions", {}).items()
-        }
+        self._avg_temperature: dict[str, float] = self._snapshot.get(
+            "avg_temperature", {}
+        )
+        self._solar_calls: dict[str, _CallSequence] = _solar_call_sequences(
+            self._snapshot, self._source
+        )
         self._ha_context = self._snapshot.get("ha_context")
         self._config_dict = self._snapshot.get("config")
 
@@ -946,12 +1273,19 @@ class ReplayIO:
         return set(self._reads)
 
     @property
+    # Geeft de entity's terug die pas na de solve werden opgevraagd en niet in de snapshot zaten.
+    def post_solve_misses(self) -> set[str]:
+        """Entity ids read after ``optimize()`` that the snapshot lacks and
+        that got a placeholder state instead of a ``SnapshotMiss``."""
+        return set(self._post_solve_misses)
+
+    @property
     # Geeft de meta-sectie van de snapshot terug.
     def meta(self) -> dict:
         return dict(self._snapshot.get("meta", {}))
 
     # Zet het opgeloste replaymodel om naar dezelfde vorm als een capture-resultaat, zodat replay-uitkomsten te diffen zijn tegen een capture of een andere replay.
-    def build_result(self) -> Optional[dict]:
+    def build_result(self) -> dict | None:
         """The replayed run's own objective/status/gap/cbc_log, in the same
         shape as a capture's ``*.result.json`` — so it can be compared
         against one with ``diff``, or against another replay run at a
@@ -978,30 +1312,70 @@ class ReplayIO:
     # -- context manager -----------------------------------------------
 
     # Installeert de patches bij het binnengaan van de with-blok.
-    def __enter__(self) -> "ReplayIO":
+    def __enter__(self) -> ReplayIO:
         self._install_patches()
         return self
 
-    # Stopt de bevroren klok en herstelt de patches bij het verlaten van de with-blok.
+    # Stopt de bevroren klok, herstelt de patches en controleert na een run die
+    # de solver bereikte dat alle opgenomen aanroepen zijn gebruikt.
     def __exit__(self, exc_type, exc, tb) -> bool:
         if self._freeze is not None:
             self._freeze.stop()
             self._freeze = None
         self._patches.restore()
+        if self._restore_tz is not None:
+            self._restore_tz()
+            self._restore_tz = None
+        # Alle price/prog-reads vallen voor model.optimize(). Een run die eerder
+        # stopte, heeft zijn eigen oorzaak; die mag deze check niet verbergen.
+        if exc_type is None and self._model is not None:
+            self._price_calls.check_consumed()
+            self._prog_calls.check_consumed()
+            for calls in self._solar_calls.values():
+                calls.check_consumed()
         return False
+
+    # Geeft de vastgelegde startwaarden mee aan calc_optimum(), tenzij de aanroeper ze zelf opgeeft.
+    def _install_calc_overrides(self, DaCalc) -> None:
+        """Pass the capture's own _start_dt/_start_soc/_start_ev_soc to
+        calc_optimum(). An argument the caller passes explicitly wins, so a
+        scenario or a `dump` can still choose its own start."""
+        import inspect
+
+        original_calc_optimum = DaCalc.calc_optimum
+        signature = inspect.signature(original_calc_optimum)
+        overrides = self._calc_overrides
+
+        # Vult ontbrekende startwaarden aan met die uit de snapshot.
+        def _wrapped_calc_optimum(instance, *args, **kwargs):
+            bound = signature.bind_partial(instance, *args, **kwargs)
+            for name, value in overrides.items():
+                if name in signature.parameters and bound.arguments.get(name) is None:
+                    bound.arguments[name] = value
+            return original_calc_optimum(*bound.args, **bound.kwargs)
+
+        self._patches.set(DaCalc, "calc_optimum", _wrapped_calc_optimum)
 
     # -- patch installation ----------------------------------------------
 
     # Zet alle class- en module-patches voor deze replaysessie neer: config, reads, writes en de klok.
     def _install_patches(self) -> None:
-        DaBase, Report, DBmanagerObj, SolarPredictor, da_base_module = _import_targets()
+        DaBase, Report, _DBmanagerObj, SolarPredictor, Meteo, da_base_module = _import_targets()
 
         if self._config_dict is None:
             raise SnapshotMiss(
                 f"ReplayIO ({self._source}): snapshot has no 'config' field; "
                 f"cannot replay without a config to construct DaBase from."
             )
-        rehydrated_config = _rehydrate_config(self._config_dict)
+        # A capture made inside the add-on has hasstoken=None (DaBase then
+        # falls back to $SUPERVISOR_TOKEN); outside the add-on that env var
+        # is absent and hassapi dies on a missing HASS_TOKEN. Replay never
+        # talks to HA, so the redaction marker is a sufficient token.
+        config_dict = copy.deepcopy(self._config_dict)
+        ha_cfg = config_dict.setdefault("homeassistant", {})
+        if ha_cfg.get("hasstoken") is None:
+            ha_cfg["hasstoken"] = REDACTED_SECRET
+        rehydrated_config = _rehydrate_config(config_dict)
         self._patches.set(DaBase, "_config", rehydrated_config)
         self._patches.set(DaBase, "_loader", _FakeLoader())
 
@@ -1013,6 +1387,8 @@ class ReplayIO:
             import dao.prog.day_ahead as day_ahead_module
 
             _install_cbc_log_capture(self._patches, day_ahead_module, self)
+            if self._calc_overrides:
+                self._install_calc_overrides(day_ahead_module.DaCalc)
         except ImportError:
             logger.warning(
                 "ReplayIO: kon day_ahead niet importeren; het CBC-log "
@@ -1037,10 +1413,33 @@ class ReplayIO:
 
         self._patches.set(DaBase, "__init__", _wrapped_init)
 
-        # Levert de opgeslagen state terug en faalt hard als de gevraagde entity niet in de snapshot zit.
+        # Levert de opgeslagen state terug en faalt hard als de gevraagde entity niet in de snapshot zit,
+        # behalve na de solve: dan krijgt de entity een placeholder.
         def _replay_get_state(instance, entity_id, *args, **kwargs):
             self._reads.add(entity_id)
+            if entity_id not in self._ha_states and entity_id in self._ha_state_errors:
+                raise RecordedReadError(
+                    f"ReplayIO ({self._source}): read of '{entity_id}' failed "
+                    f"during capture: {self._ha_state_errors[entity_id]}"
+                )
             if entity_id not in self._ha_states:
+                # Na optimize() leest calc_optimum() alleen nog states om
+                # te loggen en om HA-schrijfacties te kiezen, en die zijn in
+                # replay al no-ops. Een capture zonder oplossing komt nooit
+                # in die fase, dus zulke entity's ontbreken in de snapshot.
+                # "0" werkt zowel voor de on/off-vergelijkingen als voor de
+                # float() op de stooklijnaanpassing.
+                if self._model is not None:
+                    if entity_id not in self._post_solve_misses:
+                        logger.warning(
+                            "ReplayIO (%s): entity '%s' ontbreekt in de "
+                            "snapshot en wordt pas na de solve gelezen; "
+                            "placeholder '0' gebruikt",
+                            self._source,
+                            entity_id,
+                        )
+                    self._post_solve_misses.add(entity_id)
+                    return _FakeState("0")
                 raise SnapshotMiss(
                     f"ReplayIO ({self._source}): entity '{entity_id}' is not "
                     f"present in the snapshot's ha_states — either the "
@@ -1051,7 +1450,9 @@ class ReplayIO:
         self._patches.set(DaBase, "get_state", _replay_get_state)
 
         # Levert de opgeslagen baseload terug voor de gevraagde weekdag en faalt hard als die ontbreekt.
-        def _replay_baseload(instance, weekday, *args, **kwargs):
+        # Een staticmethod, net als DaBase.get_calculated_baseload zelf, zodat een
+        # RecordingIO bovenop deze replay hem op dezelfde manier aanroept.
+        def _replay_baseload(weekday, *args, **kwargs):
             key = str(int(weekday))
             if key not in self._baseload:
                 raise SnapshotMiss(
@@ -1060,15 +1461,13 @@ class ReplayIO:
                 )
             return self._baseload[key]
 
-        self._patches.set(DaBase, "get_calculated_baseload", _replay_baseload)
+        self._patches.set(DaBase, "get_calculated_baseload", staticmethod(_replay_baseload))
 
         # Levert de opgeslagen prijsdata terug in plaats van een databasequery uit te voeren.
-        def _replay_get_price_data(instance, start, end=None, interval="1hour"):
-            if self._price_data is None:
-                raise SnapshotMiss(
-                    f"ReplayIO ({self._source}): snapshot has no price_data."
-                )
-            return self._price_data.copy()
+        def _replay_get_price_data(instance, start, end=None, interval="1hour", extension: int = 0):
+            return self._price_calls.serve(
+                start=start, end=end, interval=interval, extension=extension
+            )
 
         self._patches.set(Report, "get_price_data", _replay_get_price_data)
 
@@ -1085,22 +1484,35 @@ class ReplayIO:
 
         self._patches.set(Report, "get_heatpump_run_hours", _replay_hp_hours)
 
+        # Levert de opgeslagen gemiddelde temperatuur terug per argumentcombinatie en faalt hard als die ontbreekt.
+        def _replay_avg_temperature(instance, *args, **kwargs):
+            key = _call_key(args, kwargs)
+            if key not in self._avg_temperature:
+                raise SnapshotMiss(
+                    f"ReplayIO ({self._source}): get_avg_temperature"
+                    f"{tuple(args)} is not present in the snapshot "
+                    f"(looked up as key {key}) — either the fixture predates "
+                    f"the heat pump being enabled, or this is a heating "
+                    f"config the capture never exercised."
+                )
+            return self._avg_temperature[key]
+
+        self._patches.set(Meteo, "get_avg_temperature", _replay_avg_temperature)
+
         # Levert de opgeslagen zonnevoorspelling terug op paneelnaam, ongevoelig voor een afwijkend tijdvenster.
         def _replay_predict_solar_device(instance, solar_option, start, end):
-            # Keyed by device name only — see the matching comment on the
-            # RecordingIO side for why (start, end) is deliberately excluded.
-            key = _call_key((getattr(solar_option, "name", None),), {})
-            if key not in self._solar_predictions:
+            # Per paneel op volgorde; start/end worden niet vergeleken, zie RecordingIO.
+            name = getattr(solar_option, "name", None)
+            if name not in self._solar_calls:
                 raise SnapshotMiss(
                     f"ReplayIO ({self._source}): predict_solar_device for "
-                    f"{getattr(solar_option, 'name', '?')!r} is not present "
-                    f"in the snapshot (looked up as key {key})."
+                    f"{name!r} is not present in the snapshot."
                 )
-            return self._solar_predictions[key].copy()
+            return self._solar_calls[name].serve(start=start, end=end)
 
         self._patches.set(SolarPredictor, "predict_solar_device", _replay_predict_solar_device)
 
-        fake_db = _FakeDbManager(self._prog_data, self._source)
+        fake_db = _FakeDbManager(self._prog_calls, self._source)
         self._patches.set(da_base_module, "make_db_da", lambda *a, **k: fake_db)
         self._patches.set(da_base_module, "make_db_ha", lambda *a, **k: fake_db)
 
@@ -1141,8 +1553,10 @@ class ReplayIO:
         # __init__.
         if not self._png:
             import matplotlib.pyplot as plt
+            from matplotlib.figure import Figure
 
             self._patches.set(plt, "savefig", _make_noop_savefig(label))
+            self._patches.set(Figure, "savefig", _make_noop_savefig(label))
 
         try:
             import freezegun
@@ -1160,7 +1574,34 @@ class ReplayIO:
                 # 0.00 sec" on every replay, since day_ahead.py measures
                 # solve time with time.perf_counter(), and a fully static
                 # clock makes any two reads of it identical by construction.
-                self._freeze = freezegun.freeze_time(captured_at, tick=True)
+                #
+                # captured_at is a naive local time. Replay in the capture's
+                # own zone (meta.tz_name; older snapshots fall back to the
+                # HA time zone), freeze at that instant, and make freezegun's
+                # naive conversions follow the process zone. Otherwise naive
+                # datetimes are read as UTC and every timestamp shifts by the
+                # UTC offset (2 h in CEST).
+                anchor = dt.datetime.fromisoformat(captured_at)
+                tz_name = self.meta.get("tz_name") or (self._ha_context or {}).get("time_zone")
+                if tz_name and anchor.tzinfo is None:
+                    from zoneinfo import ZoneInfo
+
+                    try:
+                        zone = ZoneInfo(tz_name)
+                    except Exception:  # noqa: BLE001 - unknown zone: keep the old UTC behaviour
+                        logger.warning(
+                            "ReplayIO: onbekende tijdzone %r; replay rekent in UTC", tz_name
+                        )
+                    else:
+                        self._restore_tz = _set_process_tz(tz_name)
+                        anchor = anchor.replace(tzinfo=zone)
+                        _patch_fake_datetime_local(self._patches)
+                elif not tz_name:
+                    logger.warning(
+                        "ReplayIO: snapshot bevat geen tijdzone; replay rekent in UTC"
+                    )
+                tz_offset = anchor.utcoffset() or dt.timedelta(0)
+                self._freeze = freezegun.freeze_time(anchor, tick=True, tz_offset=tz_offset)
                 self._freeze.start()
         except ImportError:
             logger.warning(
@@ -1514,7 +1955,7 @@ def _group_by_container(registry_by_idx: dict) -> dict[str, list[tuple[tuple, in
 # Zoekt de interval-as van een assen-tuple op: positie plus of het de
 # U+1-grensvariant (soc-achtig) is. Geeft None als de container geen
 # interval-as heeft (bv. cycle_cost, alleen per batterij).
-def _interval_axis(dims: tuple[str, ...]) -> Optional[tuple[int, bool]]:
+def _interval_axis(dims: tuple[str, ...]) -> tuple[int, bool] | None:
     if "u_boundary" in dims:
         return dims.index("u_boundary"), True
     if "u" in dims:
@@ -1728,7 +2169,7 @@ def _section_key(name: str, dims: tuple[str, ...], idx_or_rest: tuple) -> str:
 # Vindt de var.idx van een kaal geregistreerde Var (leeg indexpad) onder de
 # gegeven containernaam — gebruikt om "cost" te lokaliseren voor de
 # objective-attributie.
-def _find_scalar_idx(registry_by_idx: dict, name: str) -> Optional[int]:
+def _find_scalar_idx(registry_by_idx: dict, name: str) -> int | None:
     for idx, (n, path) in registry_by_idx.items():
         if n == name and path == ():
             return idx
@@ -1855,7 +2296,7 @@ def _objective_attribution(model, registry_by_idx: dict, u: int) -> tuple[list[d
 # lang, die *alle* termen van de constraint dekt. Geeft None als dat niet
 # lukt (gemengde containers/coëfficiënten, een korte of niet-aaneengesloten
 # reeks); de aanroeper valt dan terug op een andere weergave — nooit falen.
-def _try_sigma_collapse(c, registry_by_idx: dict) -> Optional[str]:
+def _try_sigma_collapse(c, registry_by_idx: dict) -> str | None:
     groups: dict[tuple, dict[int, float]] = {}
     for v, coef in c.expr.expr.items():
         entry = registry_by_idx.get(v.idx)
@@ -1889,7 +2330,7 @@ def _try_sigma_collapse(c, registry_by_idx: dict) -> Optional[str]:
     dim_names = _dims(name)
     axis_pos = _interval_axis(dim_names)[0]
     rest_dims = [d for pos, d in enumerate(dim_names) if pos != axis_pos]
-    label = name + "".join(f"[{d}={v}]" for d, v in zip(rest_dims, rest)) + "[u]"
+    label = name + "".join(f"[{d}={v}]" for d, v in zip(rest_dims, rest, strict=False)) + "[u]"
     rhs = -c.expr.const + 0.0
     sense = _SENSE_SYMBOLS.get(c.expr.sense, c.expr.sense)
     return (
@@ -1944,14 +2385,14 @@ def _constraint_signature(c, registry_by_idx: dict) -> frozenset:
     return frozenset(names)
 
 
-def _match_pattern(c, registry_by_idx: dict) -> Optional[str]:
+def _match_pattern(c, registry_by_idx: dict) -> str | None:
     return _CONSTRAINT_PATTERNS.get(_constraint_signature(c, registry_by_idx))
 
 
 # Geeft de interval-index van één losse Var terug (via zijn eigen
 # interval-as), of None als de Var niet geregistreerd is of geen
 # interval-as heeft (bv. cycle_cost[b]).
-def _term_interval(var, registry_by_idx: dict) -> Optional[int]:
+def _term_interval(var, registry_by_idx: dict) -> int | None:
     entry = registry_by_idx.get(var.idx)
     if entry is None:
         return None
@@ -1986,7 +2427,7 @@ def _is_local(c, registry_by_idx: dict, u: int) -> bool:
 # Een lokale constraint van de vorm "één variabele == 0" — een
 # inactieve asset die voor dit interval op nul is vastgezet. Wordt apart
 # gegroepeerd in plaats van los afgedrukt.
-def _pinned_zero_label(c, registry_by_idx: dict) -> Optional[str]:
+def _pinned_zero_label(c, registry_by_idx: dict) -> str | None:
     if c.expr.sense != "=":
         return None
     terms = list(c.expr.expr.items())
@@ -2011,8 +2452,8 @@ def dump_interval(
     registry: VarRegistry,
     u: int,
     *,
-    header: Optional[dict] = None,
-    battery_capacity: Optional[list] = None,
+    header: dict | None = None,
+    battery_capacity: list | None = None,
 ) -> dict:
     """Everything the solved model knew about interval ``u``. Raises
     ``VarRegistryError`` if the registry contains a container ``SHAPES``
@@ -2062,7 +2503,7 @@ def dump_interval(
                 delta = (value_out - value_in) if value_out is not None else None
                 row = {
                     "kind": "boundary",
-                    "label": name + "".join(f"[{d}={v}]" for d, v in zip(rest_dims, rest)),
+                    "label": name + "".join(f"[{d}={v}]" for d, v in zip(rest_dims, rest, strict=False)),
                     "container": name,
                     "unit": unit,
                     "value_in": value_in,
@@ -2089,7 +2530,7 @@ def dump_interval(
                     {
                         "kind": "scalar",
                         "label": name + "".join(
-                            f"[{d}={v}]" for d, v in zip(dims, idx_tuple)
+                            f"[{d}={v}]" for d, v in zip(dims, idx_tuple, strict=False)
                         ),
                         "container": name,
                         "unit": unit,
@@ -2113,18 +2554,22 @@ def dump_interval(
     price_cons = header.get("price_cons")
     price_prod = header.get("price_prod")
     for contrib in objective_contributions:
-        if contrib["label"].startswith("c_l[") and price_cons is not None:
-            if abs(contrib["coef"] - price_cons) > 1e-4:
-                price_mismatch = (
-                    f"c_l coefficient {contrib['coef']:.6f} != header price_cons "
-                    f"{price_cons:.6f}"
-                )
-        if contrib["label"].startswith("c_t[") and price_prod is not None:
-            if abs(contrib["coef"] - (-price_prod)) > 1e-4:
-                price_mismatch = (
-                    f"c_t coefficient {contrib['coef']:.6f} != -header price_prod "
-                    f"{-price_prod:.6f}"
-                )
+        if (
+            (contrib["label"].startswith("c_l[") and price_cons is not None)
+            and (abs(contrib["coef"] - price_cons) > 1e-4)
+        ):
+            price_mismatch = (
+                f"c_l coefficient {contrib['coef']:.6f} != header price_cons "
+                f"{price_cons:.6f}"
+            )
+        if (
+            (contrib["label"].startswith("c_t[") and price_prod is not None)
+            and (abs(contrib["coef"] - (-price_prod)) > 1e-4)
+        ):
+            price_mismatch = (
+                f"c_t coefficient {contrib['coef']:.6f} != -header price_prod "
+                f"{-price_prod:.6f}"
+            )
 
     cost_idx = _find_scalar_idx(by_idx, "cost")
     inv = _inverse_var_constraint_index(model)
@@ -2197,7 +2642,7 @@ def dump_interval(
                 neighbour_sections.setdefault(section_key, []).append(
                     {
                         "label": name + "".join(
-                            f"[{d}={v}]" for d, v in zip(dims, idx_tuple)
+                            f"[{d}={v}]" for d, v in zip(dims, idx_tuple, strict=False)
                         ),
                         "unit": _unit(name),
                         "value": model.vars[var_idx].x,
@@ -2231,7 +2676,7 @@ def dump_interval(
 def _format_dump_text(data: dict, show_all: bool = False) -> str:
     lines: list[str] = []
     header_bits = [f"interval {data['interval']}"]
-    for k, v in data.get("header", {}).items():
+    for v in data.get("header", {}).values():
         if v is not None:
             header_bits.append(str(v))
     lines.append("  ".join(header_bits))
@@ -2414,7 +2859,7 @@ def _resolve_snapshot_arg(data_dir: Path, given: str) -> Path:
 def _load_snapshot_file(path: Path) -> dict:
     if not path.exists():
         raise UsageError(f"Snapshot not found: {path}")
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -2427,7 +2872,7 @@ def _emit(args: argparse.Namespace, data: dict, render) -> None:
 
 
 # Geeft een korte 'rijenxkolommen'-samenvatting van een DataFrame-payload, voor gebruik in inspect.
-def _df_payload_shape(payload: Optional[dict]) -> str:
+def _df_payload_shape(payload: dict | None) -> str:
     if not payload:
         return "none"
     try:
@@ -2436,6 +2881,17 @@ def _df_payload_shape(payload: Optional[dict]) -> str:
         return f"{rows}x{cols}"
     except Exception:
         return "unknown"
+
+
+# Vorm per aanroep van een call-sequence channel ("96x3+60x3"), of de vorm van het
+# enkele frame in een schema-1-snapshot.
+def _calls_payload_shape(snapshot: dict, channel: str) -> str:
+    calls = snapshot.get(f"{channel}_calls")
+    if calls is None:
+        return _df_payload_shape(snapshot.get(channel))
+    if not calls:
+        return "none"
+    return "+".join(_df_payload_shape(rec.get("data")) for rec in calls)
 
 
 # Telt hoeveel velden in een configboom als geheim zijn geredigeerd, voor een snelle controle in inspect.
@@ -2456,8 +2912,9 @@ def _find_unredacted_secrets(value: Any, path: str = "") -> list[str]:
     and report the dotted path of every SecretStr field that is not exactly
     REDACTED_SECRET — i.e. a real or planted credential. Mirrors
     ``_sanitize_config_value``'s traversal but checks rather than redacts."""
-    from dao.prog.config.models.base import SecretStr
     from pydantic import BaseModel
+
+    from dao.prog.config.models.base import SecretStr
 
     found: list[str] = []
     if isinstance(value, SecretStr):
@@ -2482,7 +2939,7 @@ def _find_unredacted_secrets(value: Any, path: str = "") -> list[str]:
 
 
 # Laadt een live options.json via een wegwerpkopie (nooit het origineel) en vergelijkt de confighash met die van de snapshot.
-def _check_config_drift(config_path_str: str, stored_hash: Optional[str]) -> dict:
+def _check_config_drift(config_path_str: str, stored_hash: str | None) -> dict:
     """Copy-then-load: never opens the real config file for writing,
     and asserts (not just assumes) that it comes out byte-identical."""
     import shutil
@@ -2638,6 +3095,7 @@ def cmd_replay(args: argparse.Namespace, data_dir: Path) -> int:
             # from failure below.
             dacalc.calc_optimum()
         reads = sorted(replay.reads)
+        post_solve_misses = sorted(replay.post_solve_misses)
         result_dict = replay.build_result()
         solved = replay._model is not None and replay._model.num_solutions > 0
     finally:
@@ -2660,6 +3118,7 @@ def cmd_replay(args: argparse.Namespace, data_dir: Path) -> int:
         "snapshot": str(snapshot_path),
         "result": str(result_path) if result_path else None,
         "reads": reads,
+        "post_solve_misses": post_solve_misses,
         "offline": bool(args.offline),
         "threads": args.threads,
         "png": bool(args.png),
@@ -2672,6 +3131,11 @@ def cmd_replay(args: argparse.Namespace, data_dir: Path) -> int:
         print(f"threads:  {d['threads']}" + (" (all cores — pass --threads 1 for reproducibility)" if d["threads"] == -1 else ""))
         print(f"png:      {d['png']}" + ("" if d["png"] else " (pass --png to keep the chart)"))
         print(f"entities read: {len(d['reads'])}")
+        if d["post_solve_misses"]:
+            print(
+                "not in snapshot, read after the solve (placeholder '0'): "
+                + ", ".join(d["post_solve_misses"])
+            )
         print(f"result:   {d['result']}" if d["result"] else "result:   not written (solve never reached model.optimize())")
 
     _emit(args, data, render)
@@ -2687,17 +3151,18 @@ def cmd_inspect(args: argparse.Namespace, data_dir: Path) -> int:
     result_path = snapshot_path.parent / (snapshot_path.stem + ".result.json")
     result = None
     if result_path.exists():
-        with open(result_path, "r", encoding="utf-8") as f:
+        with open(result_path, encoding="utf-8") as f:
             result = json.load(f)
 
     data = {
         "path": str(snapshot_path),
         "meta": meta,
         "ha_states_count": len(snapshot.get("ha_states", {})),
-        "price_data_shape": _df_payload_shape(snapshot.get("price_data")),
-        "prog_data_shape": _df_payload_shape(snapshot.get("prog_data")),
+        "price_data_shape": _calls_payload_shape(snapshot, "price_data"),
+        "prog_data_shape": _calls_payload_shape(snapshot, "prog_data"),
         "baseload_days": len(snapshot.get("baseload", {})),
         "heatpump_run_hours_count": len(snapshot.get("heatpump_run_hours", {})),
+        "avg_temperature_count": len(snapshot.get("avg_temperature", {})),
         "secrets_redacted": _count_redacted(snapshot.get("config") or {}),
         "result": result,
     }
@@ -2712,7 +3177,8 @@ def cmd_inspect(args: argparse.Namespace, data_dir: Path) -> int:
             f"price_data {d['price_data_shape']} | "
             f"prog_data {d['prog_data_shape']} | "
             f"baseload {d['baseload_days']} day(s) | "
-            f"hp_run_hours {d['heatpump_run_hours_count']}"
+            f"hp_run_hours {d['heatpump_run_hours_count']} | "
+            f"avg_temperature {d['avg_temperature_count']}"
         )
         print(f"config    secrets: {d['secrets_redacted']} redacted")
         if d["result"]:
@@ -2779,7 +3245,7 @@ def cmd_verify(args: argparse.Namespace, data_dir: Path) -> int:
         secrets_path = Path(args.secrets).resolve()
         if not secrets_path.exists():
             raise UsageError(f"Secrets file not found: {secrets_path}")
-        with open(secrets_path, "r", encoding="utf-8") as f:
+        with open(secrets_path, encoding="utf-8") as f:
             secret_values = list(json.load(f).values())
         blob = json.dumps(snapshot, default=str)
         leaked_values = [v for v in secret_values if v and v in blob]
@@ -2924,8 +3390,8 @@ def cmd_set(args: argparse.Namespace, data_dir: Path) -> int:
 # tijdens calc_optimum() zelf, dus de opgenomen kopie heeft die kolommen
 # nog niet).
 def _lookup_price_at_interval(
-    replay: "ReplayIO", meta: dict, u: int
-) -> tuple[Optional[dt.datetime], Optional[float], Optional[float]]:
+    replay: ReplayIO, meta: dict, u: int
+) -> tuple[dt.datetime | None, float | None, float | None]:
     try:
         captured_at = meta.get("captured_at")
         interval_str = meta.get("interval")
@@ -2961,7 +3427,7 @@ def _lookup_price_at_interval(
 # zonder dat de CLI U apart hoeft te kennen.
 def _max_known_interval(registry_by_idx: dict) -> int:
     max_u = -1
-    for _var_idx, (name, idx_tuple) in registry_by_idx.items():
+    for (name, idx_tuple) in registry_by_idx.values():
         if name not in SHAPES:
             continue
         dims = _dims(name)
@@ -3238,7 +3704,7 @@ def _patch_list_restore_check() -> None:
 # A3-zelftests zodat die niet elk hun eigen kopie van de modelopbouw nodig
 # hebben.
 def _build_synthetic_sos2_model():
-    from mip import Model, xsum, BINARY, CONTINUOUS, maximize
+    from mip import BINARY, CONTINUOUS, Model, maximize, xsum
 
     B, U, CS, DS = 1, 2, 2, 2
     ac_to_dc_samples = [[0.0, 5.0]]
@@ -3359,6 +3825,46 @@ def cmd_selftest(args: argparse.Namespace, data_dir: Path) -> int:
         if k1 != k2 or k1 == k3:
             raise AssertionError("_call_key is not stable/discriminating")
 
+    # Controleert dat _CallSequence op volgorde serveert, hard faalt bij een
+    # afwijkende, extra of ongebruikte aanroep, en een schema-1-frame bij elke
+    # aanroep teruggeeft.
+    def _call_sequence_order():
+        fixed = pd.DataFrame({"value": [1.0, 2.0]})
+        pred = pd.DataFrame({"value": [3.0]})
+        records = [
+            _sequence_record({"start": "a", "interval": "15min", "extension": 0}, fixed),
+            _sequence_record({"start": "b", "interval": "1hour", "extension": 60}, pred),
+        ]
+        seq = _CallSequence("price_data", "selftest", records)
+        # start differs from the recording on purpose: timestamps are not matched
+        if seq.serve(start="x", interval="15min", extension=0)["value"].tolist() != [1.0, 2.0]:
+            raise AssertionError("first call did not get the first recording")
+        if seq.serve(start="y", interval="1hour", extension=60)["value"].tolist() != [3.0]:
+            raise AssertionError("second call did not get the second recording")
+        try:
+            seq.serve(start="z", interval="1hour", extension=60)
+            raise AssertionError("a third call did not raise SnapshotMiss")
+        except SnapshotMiss:
+            pass
+        try:
+            _CallSequence("price_data", "selftest", records).serve(interval="1hour", extension=60)
+            raise AssertionError("an interval mismatch did not raise SnapshotMiss")
+        except SnapshotMiss:
+            pass
+        seq.check_consumed()
+        partial = _CallSequence("price_data", "selftest", records)
+        partial.serve(interval="15min", extension=0)
+        try:
+            partial.check_consumed()
+            raise AssertionError("an unused recording did not raise SnapshotMiss")
+        except SnapshotMiss:
+            pass
+        legacy = _CallSequence("prog_data", "selftest", None, fixed)
+        for _ in range(3):
+            if not legacy.serve(interval="1hour").equals(fixed):
+                raise AssertionError("schema-1 frame was not served for every call")
+        legacy.check_consumed()
+
     # Controleert dat _config_hash ordeonafhankelijk is en verschilt bij een andere waarde.
     def _config_hash_determinism():
         a = _config_hash({"x": 1, "y": [1, 2]})
@@ -3366,6 +3872,24 @@ def cmd_selftest(args: argparse.Namespace, data_dir: Path) -> int:
         c = _config_hash({"x": 2, "y": [1, 2]})
         if a != b or a == c:
             raise AssertionError("_config_hash is not order-independent/discriminating")
+
+    # Controleert dat vastgelegde startwaarden heel terugkomen, inclusief de datetime.
+    def _calc_overrides_roundtrip():
+        start = dt.datetime(2026, 10, 4, 14, 15)
+        payload = json.loads(json.dumps(_overrides_to_payload({"_start_dt": start, "_start_soc": 25.35})))
+        back = _overrides_from_payload(payload)
+        if back != {"_start_dt": start, "_start_soc": 25.35}:
+            raise AssertionError(f"calc_overrides roundtrip changed the values: {back}")
+
+    # Controleert dat een brede except in calc_optimum() een SnapshotMiss niet kan inslikken.
+    def _snapshot_miss_escapes_broad_except():
+        try:
+            try:
+                raise SnapshotMiss("probe")
+            except Exception:
+                raise AssertionError("SnapshotMiss was caught by 'except Exception'") from None
+        except SnapshotMiss:
+            pass
 
     # Controleert dat de geheimenlek-check afgaat op een geplant geheim en niets doet bij schone data.
     def _secret_leak_gate():
@@ -3500,7 +4024,7 @@ def cmd_selftest(args: argparse.Namespace, data_dir: Path) -> int:
     def _scalar_vars_labelled_by_name():
         if mip is None:
             return
-        from mip import Model, CONTINUOUS
+        from mip import CONTINUOUS, Model
 
         model = Model()
         cost = model.add_var(var_type=CONTINUOUS, lb=-1000, ub=1000)
@@ -3522,7 +4046,7 @@ def cmd_selftest(args: argparse.Namespace, data_dir: Path) -> int:
     def _sigma_collapse_contiguity():
         if mip is None:
             return
-        from mip import Model, BINARY, xsum
+        from mip import BINARY, Model, xsum
 
         model = Model()
         U = 121
@@ -3553,7 +4077,7 @@ def cmd_selftest(args: argparse.Namespace, data_dir: Path) -> int:
             model = mip.Model()
             fake_registry: dict = {}
             terms = []
-            for i, name in enumerate(sorted(signature)):
+            for _i, name in enumerate(sorted(signature)):
                 v = model.add_var(var_type=mip.CONTINUOUS)
                 fake_registry[v.idx] = (name, (0,))
                 terms.append(v)
@@ -3592,7 +4116,7 @@ def cmd_selftest(args: argparse.Namespace, data_dir: Path) -> int:
     def _dangling_int_column_detection():
         if mip is None:
             return
-        from mip import Model, CONTINUOUS, INTEGER, BINARY
+        from mip import BINARY, CONTINUOUS, INTEGER, Model
 
         model = Model()
         used_int = model.add_var(var_type=INTEGER, lb=0, ub=5)
@@ -3613,8 +4137,11 @@ def cmd_selftest(args: argparse.Namespace, data_dir: Path) -> int:
     for name, fn in [
         ("dataframe_roundtrip", _dataframe_roundtrip),
         ("call_key_stability", _call_key_stability),
+        ("call_sequence_order", _call_sequence_order),
         ("config_hash_determinism", _config_hash_determinism),
         ("secret_leak_gate", _secret_leak_gate),
+        ("calc_overrides_roundtrip", _calc_overrides_roundtrip),
+        ("snapshot_miss_escapes_broad_except", _snapshot_miss_escapes_broad_except),
         ("patch_list_restore", _patch_list_restore_check),
         ("var_registry_nested_containers", _var_registry_nested_containers),
         ("shapes_completeness_fires_on_unknown_container", _shapes_completeness_fires_on_unknown_container),
@@ -3641,6 +4168,249 @@ def cmd_selftest(args: argparse.Namespace, data_dir: Path) -> int:
 
     _emit(args, data, render)
     return EXIT_OK if ok else EXIT_ASSERTION_FAILED
+
+
+# ---------------------------------------------------------------------------
+# scenario suite: list / show / validate / run / bless the declarative
+# scenario corpus in dao/prog/scenarios/cases/.
+# ---------------------------------------------------------------------------
+#
+# The runner and the synthetic-snapshot builder live in dao/prog/scenarios/;
+# they are imported lazily here so `da_debug` keeps working (capture, replay,
+# dump, …) even where pandas / the solver is not installed.
+
+
+def _scenario_pkg():
+    from dao.prog import scenarios
+
+    return scenarios
+
+
+def cmd_scenario_list(args: argparse.Namespace, data_dir: Path) -> int:
+    scenarios = _scenario_pkg()
+    rows = [
+        {"id": s.id, "description": s.description, "source": s.source_file,
+         "horizon_h": s.horizon_hours, "skip": s.skip}
+        for s in scenarios.load_all()
+    ]
+
+    def render(d):
+        for r in d["rows"]:
+            flag = " (skip)" if r["skip"] else ""
+            print(f"{r['id']:<16} {r['horizon_h']:>3}h  {r['description']}{flag}")
+        print(f"\n{len(d['rows'])} scenario(s).")
+
+    _emit(args, {"rows": rows}, render)
+    return EXIT_OK
+
+
+def cmd_scenario_show(args: argparse.Namespace, data_dir: Path) -> int:
+    scenarios = _scenario_pkg()
+    from dataclasses import asdict
+
+    from dao.prog.scenarios import baseline
+
+    try:
+        (scenario,) = scenarios.load([args.id])
+    except KeyError as ex:
+        raise UsageError(str(ex)) from ex
+    d = asdict(scenario)
+
+    # Only present when the scenario actually opts into Tier C (most of the
+    # 24 EV cases don't) — mirrors the "only print non-empty sections" rule
+    # `states`/`config_patch`/`ev` already follow below.
+    d["baseline"] = None
+    if "objective_within_baseline" in scenario.expect:
+        existing = baseline.load_baseline(scenario.id)
+        d["baseline"] = {
+            "checked": bool(scenario.expect["objective_within_baseline"]),
+            "objective": existing["objective"] if existing else None,
+            "path": str(baseline.baseline_path(scenario.id)) if existing else None,
+        }
+
+    def render(dd):
+        print(f"{dd['id']}  —  {dd['description']}")
+        print(f"  source     {dd['source_file']}")
+        print(f"  start      {dd['start']}   horizon {len(dd['prices_cons'])} h")
+        print(f"  prices.cons {dd['prices_cons']}")
+        if dd["prices_prod"] is not None:
+            print(f"  prices.prod {dd['prices_prod']}")
+        print(f"  solar      {dd['solar'] if dd['solar'] is not None else '(none — all zero)'}")
+        print(f"  options    {dd['options'] or 'options_example (default)'}")
+        if dd["states"]:
+            print("  states")
+            for k, v in dd["states"].items():
+                print(f"    {k} = {v}")
+        if dd["config_patch"]:
+            print("  config_patch")
+            for k, v in dd["config_patch"].items():
+                print(f"    {k} = {v}")
+        if dd["ev"]:
+            print(f"  ev         {dd['ev']}")
+        print(f"  expect     {dd['expect']}  (+ the Tier A invariants, always)")
+        if dd["baseline"] is not None:
+            b = dd["baseline"]
+            note = "" if b["checked"] else "  (objective_within_baseline: false — not checked)"
+            if b["objective"] is not None:
+                print(f"  baseline   {b['objective']:.6f}  ({b['path']}){note}")
+            else:
+                print(f"  baseline   none yet — reports PENDING until `scenario-bless {dd['id']}`{note}")
+
+    _emit(args, d, render)
+    return EXIT_OK
+
+
+def cmd_scenario_validate(args: argparse.Namespace, data_dir: Path) -> int:
+    scenarios = _scenario_pkg()
+    problems: list[str] = []
+    try:
+        loaded = scenarios.load_all()
+    except Exception as ex:  # noqa: BLE001
+        raise UsageError(f"scenario corpus does not load: {ex}") from ex
+
+    # base_states.json must parse and the base config must be buildable
+    try:
+        from dao.prog.scenarios.build_snapshot import load_base_states
+        n_states = len(load_base_states())
+    except Exception as ex:  # noqa: BLE001
+        problems.append(f"base_states.json: {ex}")
+        n_states = 0
+    try:
+        from dao.prog.scenarios.base_config import base_config
+        base_config("options_example")
+    except Exception as ex:  # noqa: BLE001
+        problems.append(f"options_example config does not load: {ex}")
+    if any(sc.options == "options_2ev" for sc in loaded):
+        try:
+            from dao.prog.scenarios.base_config import base_config
+            base_config("options_2ev")
+        except Exception as ex:  # noqa: BLE001
+            problems.append(f"options_2ev config does not load: {ex}")
+
+    data = {
+        "scenarios": len(loaded),
+        "base_states": n_states,
+        "problems": problems,
+        "ok": not problems,
+    }
+
+    def render(d):
+        print(f"scenarios   {d['scenarios']}  (loaded, ids unique)")
+        print(f"base_states {d['base_states']} entities")
+        for p in d["problems"]:
+            print(f"  PROBLEM: {p}")
+        print("validate:", "PASS" if d["ok"] else "FAIL")
+
+    _emit(args, data, render)
+    return EXIT_OK if not problems else EXIT_ASSERTION_FAILED
+
+
+def cmd_scenario_run(args: argparse.Namespace, data_dir: Path) -> int:
+    scenarios = _scenario_pkg()
+    from dao.prog.scenarios.runner import STATUS_PASS, STATUS_SKIP, run_scenario
+
+    try:
+        selected = scenarios.load(args.ids) if args.ids else scenarios.load_all()
+    except KeyError as ex:
+        raise UsageError(str(ex)) from ex
+
+    report_dir = (data_dir / "scenario_reports") if (args.log or args.png or args.report) else None
+
+    results = []
+    for sc in selected:
+        r = run_scenario(sc, threads=args.threads, keep_png=args.png, report_dir=report_dir)
+        results.append(r)
+        if not getattr(args, "json", False):
+            st = r.stats
+            print(f"[{r.status}] {r.id}: {r.description}"
+                  + (f"   objective {r.objective:.6f}" if r.objective is not None else "")
+                  + (f"   threads={r.threads}" if r.threads != 1 else "")
+                  + (f"   solve {st.wall_time_sec or '—'}s / {st.nodes or '—'} nodes"
+                     f" / gap {st.gap if st.gap is not None else '—'}"
+                     if st is not None else ""))
+            for f in r.failures:
+                print(f"        - {f}")
+            if r.log_path:
+                print(f"        log: {r.log_path}")
+            if r.png_path:
+                print(f"        png: {r.png_path}")
+
+    n_ok = sum(1 for r in results if r.status in (STATUS_PASS, STATUS_SKIP))
+
+    report_paths = None
+    if args.report:
+        from dao.prog.scenarios.reporting import write_reports
+
+        md_path, csv_path = write_reports(results, report_dir)
+        report_paths = {"md": str(md_path), "csv": str(csv_path)}
+        if not getattr(args, "json", False):
+            print(f"\nreport: {md_path}\nreport: {csv_path}")
+
+    data = {
+        "results": [
+            {"id": r.id, "status": r.status, "objective": r.objective,
+             "threads": r.threads, "log_path": r.log_path, "png_path": r.png_path,
+             "failures": r.failures,
+             "wall_time_sec": r.stats.wall_time_sec if r.stats else None,
+             "nodes": r.stats.nodes if r.stats else None,
+             "gap": r.stats.gap if r.stats else None,
+             "checks": [{"name": c.name, "ok": c.ok, "detail": c.detail} for c in r.checks],
+             "setup_checks": [{"name": c.name, "ok": c.ok, "detail": c.detail} for c in r.setup_checks]}
+            for r in results
+        ],
+        "passed": n_ok,
+        "total": len(results),
+        "report_paths": report_paths,
+    }
+
+    def render(d):
+        print(f"\n{d['passed']}/{d['total']} passed.")
+        bad = [r["id"] for r in d["results"] if r["status"] not in (STATUS_PASS, STATUS_SKIP)]
+        if bad:
+            print("needs a look:", bad)
+
+    _emit(args, data, render)
+    return EXIT_OK if n_ok == len(results) else EXIT_ASSERTION_FAILED
+
+
+def cmd_scenario_bless(args: argparse.Namespace, data_dir: Path) -> int:
+    """Write (or overwrite) the Tier C baseline for each given scenario id —
+    explicit, and never done implicitly by a plain `scenario-run`. Refuses
+    to bless a scenario that doesn't currently PASS, so a broken baseline
+    can't be committed by accident."""
+    scenarios = _scenario_pkg()
+    from dao.prog.scenarios import baseline
+    from dao.prog.scenarios.runner import STATUS_PASS, run_scenario
+
+    try:
+        selected = scenarios.load(args.ids)
+    except KeyError as ex:
+        raise UsageError(str(ex)) from ex
+
+    rows = []
+    for sc in selected:
+        r = run_scenario(sc, threads=args.threads)
+        if r.status != STATUS_PASS:
+            rows.append({"id": sc.id, "blessed": False, "objective": r.objective,
+                         "reason": f"{r.status}: not blessing a non-passing scenario"})
+            continue
+        if r.objective is None:
+            rows.append({"id": sc.id, "blessed": False, "objective": None,
+                         "reason": "solve produced no objective"})
+            continue
+        path = baseline.write_baseline(sc.id, r.objective)
+        rows.append({"id": sc.id, "blessed": True, "objective": r.objective, "path": str(path)})
+
+    def render(d):
+        for row in d["rows"]:
+            if row["blessed"]:
+                print(f"blessed {row['id']}: objective {row['objective']:.6f} -> {row['path']}")
+            else:
+                print(f"NOT blessed {row['id']}: {row['reason']}")
+
+    n_ok = sum(1 for row in rows if row["blessed"])
+    _emit(args, {"rows": rows}, render)
+    return EXIT_OK if n_ok == len(rows) else EXIT_ASSERTION_FAILED
 
 
 # -- argument parsing / entry point --------------------------------------
@@ -3813,6 +4583,60 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("selftest", parents=[common], help="Run da_debug's own offline checks.")
 
+    p = sub.add_parser("scenario-list", parents=[common],
+                       help="List the declarative scenarios in dao/prog/scenarios/cases/.")
+
+    p = sub.add_parser("scenario-show", parents=[common],
+                       help="Print one scenario's resolved deltas and expectations (no solve).")
+    p.add_argument("id", help="scenario id (see `scenario-list`)")
+
+    p = sub.add_parser("scenario-validate", parents=[common],
+                       help="Check the scenario corpus, base_states.json and the base config load. No solve.")
+
+    p = sub.add_parser("scenario-run", parents=[common],
+                       help="Build a synthetic snapshot per scenario, solve it hermetically, run the Tier A invariants.")
+    p.add_argument("ids", nargs="*", help="scenario ids to run (default: all)")
+    p.add_argument(
+        "--threads",
+        type=int,
+        default=1,
+        metavar="N",
+        help="CBC thread count (mip.Model.threads semantics: -1 = all cores). "
+        "Default 1, for reproducibility. Run the same scenario twice with "
+        "different --threads and compare the objective / --log output to "
+        "see whether they agree.",
+    )
+    p.add_argument(
+        "--log",
+        action="store_true",
+        help="Write the captured Python + CBC log to "
+        "<data-dir>/scenario_reports/<id>.log and print its path.",
+    )
+    p.add_argument(
+        "--png",
+        action="store_true",
+        help="Keep day_ahead.py's dispatch chart (suppressed by default) "
+        "and move it to <data-dir>/scenario_reports/<id>.png.",
+    )
+    p.add_argument(
+        "--report",
+        action="store_true",
+        help="Write a combined Markdown + CSV report of this run to "
+        "<data-dir>/scenario_reports/.",
+    )
+
+    p = sub.add_parser("scenario-bless", parents=[common],
+                       help="Solve the given scenario(s) and, if they PASS, write/overwrite their Tier C baseline. "
+                            "Never done implicitly by scenario-run.")
+    p.add_argument("ids", nargs="+", help="scenario ids to bless")
+    p.add_argument(
+        "--threads",
+        type=int,
+        default=1,
+        metavar="N",
+        help="CBC thread count for the solve backing the new baseline (mip.Model.threads semantics). Default 1.",
+    )
+
     return parser
 
 
@@ -3826,6 +4650,11 @@ _COMMANDS = {
     "dump": cmd_dump,
     "dangling": cmd_dangling,
     "selftest": cmd_selftest,
+    "scenario-list": cmd_scenario_list,
+    "scenario-show": cmd_scenario_show,
+    "scenario-validate": cmd_scenario_validate,
+    "scenario-run": cmd_scenario_run,
+    "scenario-bless": cmd_scenario_bless,
 }
 
 
@@ -3841,7 +4670,7 @@ def _print_error(args: argparse.Namespace, kind: str, ex: Exception) -> None:
 
 
 # Entry point: parseert de argumenten, kiest het commando en vertaalt uitzonderingen naar de juiste exitcode.
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
     data_dir = _resolve_data_dir(args)

@@ -2,8 +2,8 @@
 Graphics/visualization configuration models.
 """
 
-from typing import Dict
-from pydantic import BaseModel, Field, ConfigDict
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class GraphicsConfig(BaseModel):
@@ -71,7 +71,7 @@ class GraphicsConfig(BaseModel):
             "x-ui-section": "Graphics",
         },
     )
-    colors: Dict[str, Dict[str, str]] = Field(
+    colors: dict[str, dict[str, str]] = Field(
         default_factory=lambda: {
             "not_optimized": {
                 "PV AC": "green",
@@ -133,6 +133,7 @@ class GraphicsConfig(BaseModel):
     model_config = ConfigDict(
         extra="allow",
         populate_by_name=True,
+        loc_by_alias=False,
         json_schema_extra={
             "x-ui-group": "Reporting",
             "x-icon": "chart-line",

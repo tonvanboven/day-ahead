@@ -2,17 +2,19 @@
 Solar configuration models.
 """
 
-from typing import Any, Optional
+from datetime import date
+from typing import Any
+
 from pydantic import (
     BaseModel,
+    ConfigDict,
     Field,
+    PastDate,
     field_validator,
     model_validator,
-    ConfigDict,
-    PastDate,
 )
+
 from ..base import EntityId
-from datetime import date
 
 
 class SolarString(BaseModel):
@@ -50,7 +52,7 @@ class SolarString(BaseModel):
             "x-validation-hint": "Must be greater than 0",
         },
     )
-    max_power: Optional[float] = Field(
+    max_power: float | None = Field(
         default=None,
         alias="max power",
         description="Maximum output power cap in kW (MPPT limit)",
@@ -75,6 +77,7 @@ class SolarString(BaseModel):
     model_config = ConfigDict(
         extra="allow",
         populate_by_name=True,
+        loc_by_alias=False,
         json_schema_extra={
             "x-help": "Configuration for a single string of solar panels with the same tilt and orientation. Use multiple strings for panels facing different directions.",
             "x-ui-section": "Panel Orientation",
@@ -92,7 +95,7 @@ class SolarConfig(BaseModel):
             "x-ui-section": "Panel Orientation",
         },
     )
-    entity_pv_switch: Optional[EntityId] = Field(
+    entity_pv_switch: EntityId | None = Field(
         default=None,
         alias="entity pv switch",
         description="HA entity to enable/disable this solar installation",
@@ -104,7 +107,7 @@ class SolarConfig(BaseModel):
     )
 
     # Option 1: Single installation (flat config)
-    tilt: Optional[float] = Field(
+    tilt: float | None = Field(
         default=None,
         ge=0,
         le=90,
@@ -116,7 +119,7 @@ class SolarConfig(BaseModel):
             "x-validation-hint": "0-90 degrees, leave empty when using strings",
         },
     )
-    orientation: Optional[float] = Field(
+    orientation: float | None = Field(
         default=None,
         ge=-180,
         le=180,
@@ -128,7 +131,7 @@ class SolarConfig(BaseModel):
             "x-validation-hint": "-180 to 180 degrees, leave empty when using strings",
         },
     )
-    capacity: Optional[float] = Field(
+    capacity: float | None = Field(
         default=None,
         gt=0,
         description="Installed capacity (for single installation)",
@@ -139,7 +142,7 @@ class SolarConfig(BaseModel):
             "x-validation-hint": "Greater than 0, leave empty when using strings",
         },
     )
-    yield_factor: Optional[float] = Field(
+    yield_factor: float | None = Field(
         default=None,
         alias="yield",
         gt=0,
@@ -171,7 +174,7 @@ class SolarConfig(BaseModel):
             "x-ui-section": "ML Prediction",
         },
     )
-    ml_training_start_date: Optional[PastDate] = Field(
+    ml_training_start_date: PastDate | None = Field(
         default=date(2000, 1, 1),
         description="If configured the ml-traning of the solar model will be trained with the data since the start date",
         json_schema_extra={
@@ -189,7 +192,7 @@ class SolarConfig(BaseModel):
             "x-ui-widget-filter": "sensor",
         },
     )
-    max_power: Optional[float] = Field(
+    max_power: float | None = Field(
         default=None,
         alias="max power",
         description="Maximum output power cap in kW (MPPT limit)",
@@ -203,6 +206,7 @@ class SolarConfig(BaseModel):
     model_config = ConfigDict(
         extra="allow",
         populate_by_name=True,
+        loc_by_alias=False,
         json_schema_extra={
             "x-ui-group": "Energy",
             "x-icon": "solar-panel",

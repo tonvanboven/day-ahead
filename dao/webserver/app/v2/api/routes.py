@@ -4,19 +4,20 @@ import os
 import sys
 import threading
 import time
-
-from flask import Blueprint, jsonify, render_template, request, redirect, url_for
-from markupsafe import escape
-from dao.prog.da_report import Report
-from subprocess import run as subprocess_run
-from dao.prog.da_base import DaBase
-from dao.prog.config.loader import ConfigurationLoader
-from dao.prog.version import __version__
-from datetime import date, datetime, time as dtime, timedelta
+from datetime import date, datetime, timedelta
+from datetime import time as dtime
 from pathlib import Path
+from subprocess import run as subprocess_run
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+from flask import Blueprint, jsonify, request
+from markupsafe import escape
+
+from dao.prog.config.loader import ConfigurationLoader
+from dao.prog.da_base import DaBase
+from dao.prog.da_report import Report
+from dao.prog.version import __version__
 
 from ..routes import (
     app_datapath,
@@ -98,7 +99,7 @@ def data():
 @api.route("/run/<string:task>")
 def run(task: str):
     tasks = DaBase.generate_tasks()
-    if task in tasks.keys():
+    if task in tasks:
         proc = subprocess_run(tasks[task]["cmd"], capture_output=True, text=True)
         data = proc.stdout
         err = proc.stderr
@@ -118,7 +119,6 @@ def data_sql_ha():
     data_report = Report()
     start = request.args.get('start')
     end = request.args.get('end')
-    aggregate = request.args.get('aggregate')
     fields = request.args.get('fields')
 
     if fields:
@@ -257,7 +257,7 @@ def _read_log(logfile: str | None, max_chars: int = 8000) -> str:
     if not logfile:
         return ""
     try:
-        with open(logfile, "r") as f:
+        with open(logfile) as f:
             content = f.read()
     except OSError:
         return ""
@@ -505,7 +505,7 @@ def baseloads():
     for weekday in range(7):
         file_name = BASELOAD_PATH + f"baseload_{weekday}.json"
         try:
-            with open(file_name, "r") as f:
+            with open(file_name) as f:
                 weekdays[weekday] = json.load(f)
         except (OSError, json.JSONDecodeError):
             continue
@@ -565,7 +565,7 @@ def ml_models():
             "stats": None,
         }
         try:
-            with open(stats_file, "r") as f:
+            with open(stats_file) as f:
                 entry["stats"] = json.load(f)
         except (OSError, json.JSONDecodeError):
             pass

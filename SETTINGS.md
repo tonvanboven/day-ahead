@@ -43,6 +43,7 @@
   - [🏠 HomeAssistantConfig](#homeassistantconfig)
 - [Other](#other)
   - [BatteryStage](#batterystage)
+  - [CopTemperaturePoint](#coptemperaturepoint)
   - [EVChargeScheduler](#evchargescheduler)
   - [EVChargeStage](#evchargestage)
   - [EntityId](#entityid)
@@ -50,8 +51,10 @@
   - [FlexEnum](#flexenum)
   - [FlexFloat](#flexfloat)
   - [FlexInt](#flexint)
+  - [HADataSensor](#hadatasensor)
   - [HeatingStage](#heatingstage)
   - [MachineProgram](#machineprogram)
+  - [PricePrediction](#priceprediction)
   - [ScheduleEntry](#scheduleentry)
   - [SecretStr](#secretstr)
   - [SocPowerLimit](#socpowerlimit)
@@ -133,7 +136,7 @@ Configure your home battery storage system for optimal energy management and cos
 | `dc_to_bat max power` | [FlexFloat](#flexfloat) (optional) | No | `null` | DC to battery max power in watts (Unit: `W`) _Must be > 0_ |
 | `bat_to_dc efficiency` | number | Yes | — | Battery to DC efficiency (Unit: `ratio`) _0.0-1.0, typically 0.95-0.98_ |
 | `bat_to_dc max power` | [FlexFloat](#flexfloat) (optional) | No | `null` | Battery to DC max power in watts (Unit: `W`) _Must be > 0_ |
-| `cycle cost` | number | Yes | — | Cost per battery cycle in euros (Unit: `€`) _Must be >= 0, typically €0.50-€1.50 per cycle_ |
+| `cycle cost` | number | Yes | — | Battery wear cost per kWh moved, charged on charging and on discharging (Unit: `€/kWh`) _Must be >= 0, typically €0.01-€0.05 per kWh_ |
 | `entity set power feedin` | [EntityId](#entityid) (optional) | No | `null` | HA entity to set power feed-in to grid |
 | `preload next interval controls` | boolean | No | `false` | Restore cached battery and EV controls at the start of the next interval |
 | `entity set operating mode` | [EntityId](#entityid) (optional) | No | `null` | HA entity to set battery operating mode |
@@ -228,7 +231,7 @@ Maximum power for battery to DC bus conversion in watts. Rarely used in typical 
 
 **`cycle cost`**
 
-Degradation cost per full charge-discharge cycle in euros. Used to factor battery wear into optimization. Calculate as: (battery_cost / warranted_cycles). Example: €5000 battery with 6000 cycles = €0.83/cycle.
+Degradation cost in euros per kWh moved in or out of the battery, measured on the DC side. It is charged twice per cycle: once on the charge leg and once on the discharge leg (half cycles). One full charge-discharge of E kWh therefore costs about 2 × cycle cost × E. Convert a per-cycle figure with: cycle cost = battery_cost / (warranted_cycles × capacity × 2). Example: a €5000, 10 kWh battery warranted for 6000 cycles is €0.83 per full cycle, so enter 5000 / (6000 × 10 × 2) = 0.042 €/kWh.
 
 **`entity set power feedin`**
 
@@ -492,6 +495,7 @@ Use `charge_scheduler` for time-based optimization:
 | `charge switch` | [EntityId](#entityid) | Yes | — | HA switch entity to control charging |
 | `entity set charging ampere` | [EntityId](#entityid) | Yes | — | HA entity to set charging amperage (Unit: `A`) |
 | `entity stop charging` | [EntityId](#entityid) (optional) | No | `null` | HA entity for stop charging datetime |
+| `entity charging schedule` | [EntityId](#entityid) (optional) | No | `null` | HA text entity for the calculated charging schedule |
 
 <details>
 <summary><b>📖 Field Details</b> (click to expand)</summary>
@@ -555,6 +559,10 @@ Home Assistant entity to control charging current in amperes. System will adjust
 **`entity stop charging`**
 
 Home Assistant datetime entity specifying when to stop charging. Provides manual override of optimized schedule.
+
+**`entity charging schedule`**
+
+Optional Home Assistant text entity where DAO writes all planned EV charging periods, including their amperage and partial-interval end times, after each optimization.
 
 </details>
 
@@ -708,8 +716,10 @@ Define power levels and corresponding COP values:
 | `heater present` | boolean | Discriminator | `true` | Whether heating system is present/enabled |
 | `entity hp enabled` | [EntityId](#entityid) (optional) | No | `null` | HA binary sensor for heat pump enabled status |
 | `degree days factor` | [FlexFloat](#flexfloat) | No | `1.0` | Degree days factor for heat demand calculation (Unit: `factor`) _Must be > 0, typically 0.5-10.0_ |
+| `degree_days_base_temperature` | number | No | `16.0` | Base temperature (heating limit) for degree days (Unit: `°C`) _Between 0 and 30, typically 15-18_ |
 | `adjustment` | string | No | `"power"` | Adjustment mode. Options: `on/off`, `power`, `heating curve` |
 | `stages` | list[[HeatingStage](#heatingstage)] | No | `[]` | Heating power/COP stages _Required for 'power' and 'heating curve' adjustment; must be sorted by max_power_ |
+| `cop_temperature_curve` | list[[CopTemperaturePoint](#coptemperaturepoint)] | No | `[]` | COP factor per outdoor temperature _Sorted by temperature (ascending), factors > 0_ |
 | `entity adjust heating curve` | [EntityId](#entityid) (optional) | No | `null` | HA entity to adjust heating curve |
 | `adjustment factor` | number (optional) | No | `null` | Factor for heating curve adjustment (Unit: `factor`) _Typically 0.5-2.0 if specified_ |
 | `min run length` | integer | No | `1` | Minimum run length in time intervals (Unit: `intervals`) _Must be >= 1, typically 2-4 for 1h intervals_ |
@@ -735,6 +745,10 @@ Optional: Home Assistant binary sensor indicating if heat pump is enabled and op
 
 Multiplier for degree-day heat demand calculation. Adjust based on building insulation and heat loss. Higher = more heat needed. Typical: 0.5-2.0.
 
+**`degree_days_base_temperature`**
+
+Average daily outdoor temperature in °C at and above which no heating is needed (the heating limit). Heat demand is calculated from the degree days below this temperature: (base temperature - average outdoor temperature) per day. Raise it if your heating starts at a higher outdoor temperature, lower it for a well-insulated house. Default: 16 °C.
+
 **`adjustment`**
 
 Heat pump control mode: 'on/off' = simple binary control, 'power' = variable power control, 'heating curve' = adjust heating curve based on weather.
@@ -742,6 +756,10 @@ Heat pump control mode: 'on/off' = simple binary control, 'power' = variable pow
 **`stages`**
 
 Power and efficiency stages for heat pump. Required (at least 1) when adjustment is 'power' or 'heating curve'. Multiple stages model variable-speed compressors. Must be sorted by power ascending. When a 0 W stage is missed this is supplied by the program.
+
+**`cop_temperature_curve`**
+
+Optional: how the COP changes with the outdoor temperature. Each point gives a factor on all stage COPs at an outdoor temperature; between points the factor is interpolated linearly, outside them the nearest point's factor is used. The stage COPs are then the COPs at the temperature where the factor is 1.0 (e.g. 7 °C). For every interval the factor at the forecast temperature (meteo) is used, so the heat pump is planned in the warmer hours when the higher COP outweighs the price. Empty: the stage COPs are used for every temperature.
 
 **`entity adjust heating curve`**
 
@@ -1294,7 +1312,7 @@ Total electricity cost consists of:
 2. **Energy taxes**: Government energy taxes
 3. **Supplier costs**: Your supplier's markup/fees
 4. **VAT**: Value-added tax on sum of above
-5. **Multiplier**: For calculation of productionprice in Belgium 
+5. **Multiplier**: For calculation of productionprice in Belgium
 
 Price = (market*multiplier + taxes + supplier) × (1 + VAT)
 
@@ -1330,12 +1348,14 @@ System uses tariff active on optimization date.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `source day ahead` | string | No | `"nordpool"` | Source for day-ahead prices. Options: `nordpool`, `entsoe`, `tibber` |
+| `source day ahead` | string | No | `"nordpool"` | Source for day-ahead prices. Options: `nordpool`, `entsoe`, `tibber`, `ha` |
+| `ha_epex_spot` | [HADataSensor](#hadatasensor) (optional) | No | `null` | Configuration of getting pricedata from the ha-custom component 'epex spot'. |
+| `prediction` | [PricePrediction](#priceprediction) (optional) | No | `null` | Configuration of getting and using priceprediction beyond the day ahead spotprices of epex. |
 | `entsoe-api-key` | [SecretStr](#secretstr) (optional) | No | `null` | ENTSO-E API key (can use !secret) _Required for entsoe source, use !secret_ |
 | `energy taxes consumption` | object | Yes | — | Energy taxes for consumption by date (YYYY-MM-DD -> euro/kWh ex VAT) (Unit: `€/kWh`) _Dict with YYYY-MM-DD keys, float values (ex VAT)_ |
 | `energy taxes production` | object | Yes | — | Energy taxes for production by date (YYYY-MM-DD -> euro/kWh ex VAT) (Unit: `€/kWh`) _Dict with YYYY-MM-DD keys, float values (ex VAT)_ |
 | `cost supplier consumption` | object | Yes | — | Supplier costs for consumption by date (YYYY-MM-DD -> euro/kWh ex VAT) (Unit: `€/kWh`) _Dict with YYYY-MM-DD keys, float values (ex VAT)_ |
-| `cost supplier production` | object | Yes | — | Supplier costs for production by date (YYYY-MM-DD -> euro/kWh ex VAT) (Unit: `€/kWh`) _Dict with YYYY-MM-DD keys, float values (ex VAT)_ |
+| `cost supplier production` | object | Yes | — | Supplier costs for production (feed-in) by date (YYYY-MM-DD -> euro/kWh ex VAT) negative if you must pay for feed-in, positive if you get income for feed-in  (Unit: `€/kWh`) _Dict with YYYY-MM-DD keys, float values (ex VAT)_ |
 | `vat consumption` | object | Yes | — | VAT percentage for consumption by date (YYYY-MM-DD -> %) (Unit: `%`) _Dict with YYYY-MM-DD keys, integer 0-100 values_ |
 | `vat production` | object | Yes | — | VAT percentage for production by date (YYYY-MM-DD -> %) (Unit: `%`) _Dict with YYYY-MM-DD keys, integer 0-100 values_ |
 | `multiplier consumption` | object (optional) | No | `{'2000-01-01': 1.0}` | Multiplier for consumption by date (YYYY-MM-DD -> x.xx) (Unit: `-`) _Dict with YYYY-MM-DD keys, float -100.0 - +100.0 values_ |
@@ -1348,7 +1368,15 @@ System uses tariff active on optimization date.
 
 **`source day ahead`**
 
-Data source for day-ahead electricity market prices. 'nordpool' for Nordic/Baltic, 'entsoe' for European markets, 'tibber' if using Tibber integration.
+Data source for day-ahead electricity market prices. 'nordpool' and 'entsoe' for European markets, 'tibber' if using Tibber integration. 'ha' for generic solutions
+
+**`ha_epex_spot`**
+
+Configuration of getting the day ahead prices from 'epex spot'.
+
+**`prediction`**
+
+Configuration of getting and using priceprediction beyond the day ahead spotprices of epex.
 
 **`entsoe-api-key`**
 
@@ -1368,7 +1396,7 @@ Supplier markup/fees for consumption (excluding VAT) indexed by effective date. 
 
 **`cost supplier production`**
 
-Supplier fees for feed-in/production (excluding VAT) indexed by effective date. May be negative (credit). Format: {'2024-01-01': -0.02}.
+Supplier fees for feed-in/production (excluding VAT) indexed by effective date. Negative if you must pay for feed-in, positive if you get income for feed-in. Format: {'2024-01-01': -0.02}.
 
 **`vat consumption`**
 
@@ -1605,7 +1633,7 @@ All entity fields accept lists of HA sensors:
 | `entities battery consumption` | list[[EntityId](#entityid)] | No | `null` | HA entities for battery consumption (Unit: `kWh`) |
 | `entities battery production` | list[[EntityId](#entityid)] | No | `null` | HA entities for battery production (Unit: `kWh`) |
 | `entities machine consumption` | list[[EntityId](#entityid)] | No | `null` | HA entities for machine consumption (Unit: `kWh`) |
-| `co2 intensity sensor` | [EntityId](#entityid) (optional) | No | `null` | HA entity for CO2 intensity (Unit: `gCO2/kWh`) |
+| `entity co2-intensity` | list[[EntityId](#entityid)] or [EntityId](#entityid) (optional) | No | `[]` | HA entity for CO2 intensity (Unit: `gCO2/kWh`) |
 | `sensors` | object (optional) | No | `null` | Additional sensors configuration |
 
 <details>
@@ -1651,7 +1679,7 @@ List of Home Assistant sensor entities measuring battery discharging (production
 
 List of Home Assistant sensor entities measuring appliance/machine consumption (washing machine, dishwasher, etc.). Used for machine-specific reporting.
 
-**`co2 intensity sensor`**
+**`entity co2-intensity`**
 
 Optional: Home Assistant sensor for grid CO2 intensity (gCO2/kWh). Used to calculate and report carbon footprint of electricity usage.
 
@@ -1732,7 +1760,7 @@ Define when automatic tasks run using time patterns.
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `active` | boolean | No | `true` | Enable or disable the scheduler |
-| `start early seconds` | integer | No | `10` | Seconds before the scheduled minute to start tasks (Unit: `seconds`) _Must be between 0 and 59 seconds_ |
+| `offset` | integer (optional) | No | `10` | Seconds before the scheduled minute to start tasks (Unit: `s`) _Must be between 0 and 60 seconds_ |
 | `schedule` | list[[ScheduleEntry](#scheduleentry)] | No | `null` | Scheduled task entries |
 
 <details>
@@ -1742,9 +1770,9 @@ Define when automatic tasks run using time patterns.
 
 When enabled, scheduled tasks will run automatically at configured times. Disable to prevent all scheduled tasks from running.
 
-**`start early seconds`**
+**`offset`**
 
-Start scheduled tasks this many seconds before the configured minute so subprocess initialization can finish at the interval boundary.
+Start scheduled tasks this many seconds before the configured minute so subprocess initialization can finish at the interval boundary. The legacy 'start early seconds' option is also accepted.
 
 **`schedule`**
 
@@ -1877,6 +1905,29 @@ Energy conversion efficiency at this power level. Value between 0 and 1, where 1
 </details>
 
 
+### CopTemperaturePoint
+
+_Point of the COP temperature curve: a COP factor at an outdoor temperature._
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `temperature` | number | Yes | — | Outdoor temperature in °C (Unit: `°C`) |
+| `factor` | number | Yes | — | COP factor at this outdoor temperature (Unit: `factor`) _Must be > 0_ |
+
+<details>
+<summary><b>📖 Field Details</b> (click to expand)</summary>
+
+**`temperature`**
+
+Outdoor temperature in °C at which the factor applies.
+
+**`factor`**
+
+Factor applied to every stage COP at this outdoor temperature. 1.0 at the temperature the stage COPs are given for (e.g. 7 °C, the A7 rating point).
+
+</details>
+
+
 ### EVChargeScheduler
 
 _EV charge scheduling configuration._
@@ -1967,6 +2018,37 @@ FlexValue enables dynamic configuration using Home Assistant entities. Instead o
 *No configuration fields.*
 
 
+### HADataSensor
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `ha_entity` | [EntityId](#entityid) (optional) | No | `"sensor.epex_spot_data_market_price"` | HA sensor where data are available as attribute |
+| `ha_attribute` | string (optional) | No | `"data"` | The name of attribute in the HA sensor where a list of data are available.Every item in de list contain at least a datetime field and a value field |
+| `ha_datetime_field` | string (optional) | No | `"start_time"` | The name of datetime field in the list item |
+| `ha_value_field` | string (optional) | No | `"price_per_kwh"` | The name of value field in the list item |
+
+<details>
+<summary><b>📖 Field Details</b> (click to expand)</summary>
+
+**`ha_entity`**
+
+Optional: Home Assistant sensor with data.
+
+**`ha_attribute`**
+
+Home Assistant sensor the name of the attribute with the data.
+
+**`ha_datetime_field`**
+
+Home Assistant sensor the name/key of the datetime-field in the list-item.
+
+**`ha_value_field`**
+
+Home Assistant sensor the name/key of the value-field in the list-item.
+
+</details>
+
+
 ### HeatingStage
 
 _Single heating stage with power and COP._
@@ -2017,6 +2099,37 @@ Power profile as list of watts per time interval. Length defines program duratio
 </details>
 
 
+### PricePrediction
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `extension` | integer (optional) | No | `0` | The amount of hours the planninghorizon is extended beyond the horizon of the regular day ahead prices (Unit: `h`) |
+| `source` | string (optional) | No | `"dap"` | The name of the supplier of prediction data, now there is support for epexpredictor, dap and energypriceforecast_eu |
+| `api` | string (optional) | No | `"https://raw.githubusercontent.com/corneel27/day-ahead-prediction/main/dap/data/prediction.json"` | The url of the supplier of prediction data, with which DAO can get the prediction data  |
+| `api_key` | [SecretStr](#secretstr) (optional) | No | `null` | api key for request of predicted prices (can use !secret) _Required for jeroen_nl, use !secret_ |
+
+<details>
+<summary><b>📖 Field Details</b> (click to expand)</summary>
+
+**`extension`**
+
+The amount of hours the planninghorizon is extended beyond the horizon of the regular day ahead prices
+
+**`source`**
+
+The name of the supplier of prediction data, now there is support for epexpredictor, dap and energypriceforecast_eu
+
+**`api`**
+
+The url of the supplier to get the prediction datafor Epexpredictor: https://epexpredictor.batzill.com/prices?region=<region>&hours=<hours>for energypriceforecast.eu: https://api.energypriceforecast.eu/api/v1/dao/prices?country=<region>&hours=<hours>for da_prediction: https://raw.githubusercontent.com/corneel27/day-ahead-prediction/main/dap/data/prediction.jsonfor jeroen_nl: https://jeroen.nl/api/dynamische-energieprijzen/v2/?key=<key>&period=voorspelling&type=json
+
+**`api_key`**
+
+API key for several sources of predicted prices, like jeroen_nl.
+
+</details>
+
+
 ### ScheduleEntry
 
 _A single scheduled task entry._
@@ -2024,7 +2137,7 @@ _A single scheduled task entry._
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `time` | string | Yes | — | Time pattern in HHMM format _Format: HHMM (24-hour, e.g., '0435', 'xx15')_ |
-| `action` | string | Yes | — | Action to execute at this time. Options: `get_meteo_data`, `get_tibber_data`, `get_day_ahead_prices`, `calc_optimum`, `calc_optimum_met_debug`, `clean_data`, `calc_baseloads`, `train_ml_predictions` |
+| `action` | string | Yes | — | Action to execute at this time. Options: `calc_optimum_met_debug`, `calc_optimum`, `get_tibber_data`, `get_meteo_data`, `get_day_ahead_prices`, `get_predicted_prices`, `calc_baseloads`, `clean_data`, `train_ml_predictions`, `consolidate` |
 
 <details>
 <summary><b>📖 Field Details</b> (click to expand)</summary>

@@ -2,8 +2,9 @@
 Grid configuration models.
 """
 
-from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional
+
+from pydantic import BaseModel, ConfigDict, Field
+
 from .base import EntityId
 
 
@@ -21,7 +22,7 @@ class GridConfig(BaseModel):
         },
     )
 
-    entity_balance_switch: Optional[EntityId] = Field(
+    entity_balance_switch: EntityId | None = Field(
         default=None,
         alias="entity balance switch",
         description="HA entity for grid balancing switch",
@@ -32,7 +33,7 @@ class GridConfig(BaseModel):
             "x-ui-widget-filter": "switch",
         },
     )
-    entity_grid_setpoint: Optional[EntityId] = Field(
+    entity_grid_setpoint: EntityId | None = Field(
         default=None,
         alias="entity grid setpoint",
         description="HA entity for the grid setpoint",
@@ -45,6 +46,7 @@ class GridConfig(BaseModel):
     model_config = ConfigDict(
         extra="allow",
         populate_by_name=True,
+        loc_by_alias=False,
         json_schema_extra={
             "x-ui-group": "Energy",
             "x-icon": "transmission-tower",

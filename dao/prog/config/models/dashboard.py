@@ -4,7 +4,7 @@ Dashboard/web UI configuration models.
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DashboardConfig(BaseModel):
@@ -33,6 +33,7 @@ class DashboardConfig(BaseModel):
 
     model_config = ConfigDict(
         extra="allow",
+        loc_by_alias=False,
         json_schema_extra={
             "x-ui-group": "Integration",
             "x-ui-section": "Dashboard",

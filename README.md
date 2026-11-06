@@ -17,7 +17,7 @@ Het programma draait alleen als addon op HA-installaties met een arm64 processor
 een intel 64 bit processor (amd64). Maar het kan ook separate Docker-container worden geinstalleerd
 
 ## Deze fork
-Deze release is gebaseerd op de stabiele productieversie `2026.9.1` van de oorspronkelijke [DAO-repository `corneel27/day-ahead`](https://github.com/corneel27/day-ahead). Updates uit latere release candidates zijn niet opgenomen.
+De testrelease `2026.11.0.rc1` is gebaseerd op de stabiele productieversie `2026.11.0` van de oorspronkelijke [DAO-repository `corneel27/day-ahead`](https://github.com/corneel27/day-ahead), met behoud van de eigen TvB-aanpassingen hieronder.
 
 Ten opzichte van die productieversie bevat deze fork de volgende eigen aanpassingen:
 

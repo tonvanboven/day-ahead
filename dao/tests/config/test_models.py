@@ -1,8 +1,17 @@
 import pytest
 from pydantic import BaseModel, ValidationError
-from dao.prog.config.models.base import EntityId, FlexValue, FlexFloat, FlexInt, FlexBool, FlexStr, SecretStr
-from dao.prog.config.models.graphics import GraphicsConfig
+
+from dao.prog.config.models.base import (
+    EntityId,
+    FlexBool,
+    FlexFloat,
+    FlexInt,
+    FlexStr,
+    SecretStr,
+)
 from dao.prog.config.models.dashboard import DashboardConfig
+from dao.prog.config.models.graphics import GraphicsConfig
+from dao.prog.config.models.scheduler import SchedulerConfig
 
 
 class TestDashboardConfig:
@@ -15,6 +24,14 @@ class TestDashboardConfig:
     def test_ui_version_rejects_unknown_value(self):
         with pytest.raises(ValidationError):
             DashboardConfig(**{"ui version": "v3"})
+
+
+class TestSchedulerConfig:
+    def test_upstream_offset_option(self):
+        assert SchedulerConfig(offset=12).offset == 12
+
+    def test_legacy_start_early_seconds_option(self):
+        assert SchedulerConfig(**{"start early seconds": 12}).offset == 12
 
 
 class _Model(BaseModel):

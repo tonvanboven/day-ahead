@@ -1,5 +1,8 @@
 # Changelog 刀 DAO
 # Day Ahead Optimizer
+# 2026.11.0.rc1
+- Test release of upstream 2026.11.0 with the TvB fork's preload controls, configurable graphs, and external JSON API retained.
+
 # 2026.9.1.rc8
 - Moved periodic scheduler timing diagnostics to DEBUG so INFO logs are not filled every minute.
 - Prevented the same early-start schedule slot from being processed again at the exact minute.
@@ -27,6 +30,72 @@
 
 # 2026.9.1.rc2
 - Added configurable default UI version support.
+
+# Upstream 2026.11.0.rc2
+This is the last testrelease before the next stable release (unless some finds an error that must be fixed and tested).
+
+## Fixes
+Fixed dt-error in several report/api requests
+
+# Upstream 2026.11.0.rc1
+## Changes
+- Implemented ha_epex_spot as day ahead source (via generic ha-datasource)
+- Further implementation of CI/CD (thanks @Dogooder)
+- Speed up runs and PNG generation (thanks @dewi-ny-je)
+- Make cop of your hp dependent of the outdoor temperature (thanks @llevering)
+
+## Fixes
+- Heat pump curve adjustment is also performed when no heat is needed
+- Fixed dst-issues in grid-reports and api get pv_ac/pv_dc
+- updates of several modules
+
+# 2026.10.0.rc2
+## Breaking change
+The scheduler task for retrieving predicted prices is renamed to: **get_predicted_prices**
+and works now
+## Changes
+- Fix error calculate distance to weather station (reported by @buiter)
+- Fixed error in the graph "not optimized": consumption and production in the "not predicted part" where in kWh this is changed to kW.
+- Make the degree-days base temperature (stookgrens) configurable (thanks @voogel)
+- Validate and load the json before storing it: prevents DAO from crashing (thanks @storeman)
+- Introducting of Ruff as linter (@thanks @Lasoul)
+- Heat pump (power mode): size blocks from hours needed, not hours available (thanks @llevering)
+- clean-up and centralication of task (with aliases) now rest-api works again (thanks @storeman, reported by @Dabit)
+- added .devcontainer to help development on system with VS (see DEVELOPMENT.md, thanks @Lasoul)
+- added jeroen_nl (jeroen.nl) as source for predicted prices
+- update several python modules
+
+# 2026.10.0.rc1
+## Changes
+- The new V2 UI from @storeman is now the default user interface
+- @Dogooder has build new CI-testsuite which runs on GitHub. This prevents that during the development old errors return or most of new introduced errors are detected and repaired.
+- We started with the expansing of the calculation horizon.
+In this release we make a first step in the realization of that.
+In this version you can:
+  - retrieve predicted prices up to 96 hours beyound the epex-spot horizon
+  - retrieve the needed meteo-data from meteoserver (model gfs)
+  - perform a calculation up to 96 hours beyound the epx-spot horizon<br>
+
+  Be aware that in this release the following parts are not adjusted yet and don't give the expected results:
+  - the planning of the boiler: only one heating session is planned in. We are working on a new boiler-model with more heating-sessions in the planning period.
+  - the planning of the ev: still "old style".  This will become more sofisticated with the possibility to configure a minimum SoC (with datetime) and planning will be allowed when "away" or "unplugged"
+  - the planning of the hp: there wil become a rolling window (the length will be configurable, depending on the cooling rate and your comfort demands)
+  - there is the possibility to encounter errors in the calculation results. We encourage you to find and report these errors.
+
+  There is seperate configuration topic about this new feature available in the Wiki: https://github.com/corneel27/day-ahead/wiki/2.-Installatie-en-basis-configuratie#berekeningshorizon-uitbreiden
+
+- Added option to config an offset (in seconds, default 10) to start tasks in the scheduler earlier (because of the timeoverhead of starting tasks)
+- You can get the EV planning as text in ha (thanks @jeroenribbink)
+
+## Fixes
+
+- Improve MariaDB HA statistics query performance with portable filtering (thanks @lasoul)
+- Fix/keep changes on saving configuration with json format errors
+- Get day-ahead prices from nordpool/tibber through loop and moved arguments to correct place
+- Fix battery graph crash with more than one battery
+- Extra clearification of the use of "cost_supplier_production" (reported by @dingo35)
+- Fixed error in config of CO2-intensity sensor and the calculations with it (reported by @steynovich)
+- update of several python-modules
 
 # 2026.9.1.rc1
 - Prepared the 2026.9.1 testing release with the scheduler and ARM64 fixes from the stable release.
@@ -64,7 +133,7 @@ Changes:
 
 - rc4: Fixed error in app/docker entry
 - rc3: Fixed 2e error in watchdog
-- rc2: Fixed error in watchdog 
+- rc2: Fixed error in watchdog
 Fixes rc1:
 - Reload changed config for reports (changed watchdog.sh to restart scheduler and reload workers webserver)
 - fixed error if boiler setting gives no optimization room to DAO (setpoint - hysterese <= heating_allowed_below)
@@ -76,7 +145,7 @@ Fixes rc1:
 # 2026.7.0.rc2
 
 A number of found issues in rc1 are fixed:
-- the combination of Instant start and a very tiny window from entity_ready_datetime 
+- the combination of Instant start and a very tiny window from entity_ready_datetime
 from home assistant could let the CBC solver crash.
 - Also the entity_ready_datetime still influenced the amount to charge at instant charge. Now it's behaving like described in the wiki.
 - support light/dark mode
@@ -88,7 +157,7 @@ from home assistant could let the CBC solver crash.
 # 2026.7.0.rc1
 
 This release contains two big changes/improvements:
-1. @storeman is started with the rewriting of the user-interface. 
+1. @storeman is started with the rewriting of the user-interface.
 You can find his proceedings with the menu-option "UI V2". It is mostly written in javascript.
 2. @Dogooder has investigated and improved the mip-calculation of the ev-model of DAO. He also have build a test-suite
 for the ev-module under certain stress-circumstances.
@@ -96,7 +165,7 @@ I thank both contributors for their great efforts!! <br>
 
 The other changes in this release:
 - when "stop_inverter" is not configured the calculated bat-power is now spread out over the hole interval.
-- correct stop_omvormer when feedin > 0.0 (suggested by @Dogooder) 
+- correct stop_omvormer when feedin > 0.0 (suggested by @Dogooder)
 - correct index error with reduce_power_low_soc and reduce_power_high_soc
 - added multithread so it uses all available cores during mip-calculation (thanks @Dogooder)
 - correct baseload calculation for machine usage (thanks @gijsstat)
@@ -185,7 +254,7 @@ Many thanks to all of them: great job.
 ### Breaking change
 The ML model was extended to allow for windspeed in predictions. this means you have to retrain the ML models before running a calculation!
 
-Before we go with this release to production/stable we will ask all the testers to run a new test.  
+Before we go with this release to production/stable we will ask all the testers to run a new test.
 We hope we have tackled all the errors.
 How to test: before installing this release: copy your old options.json (saved in `options_unversioned.json`) to options.json
 Then install the new release (or when you allready have installed restart the addon/app)
@@ -201,7 +270,7 @@ Most important **changes** in the config/options.json:<br>
 
 These errors are **fix**ed:
 - defaults for battery low- (20%) and upper-limit (100%)
-- default for ev "entity stop charging" (none) 
+- default for ev "entity stop charging" (none)
 - boiler activate service mst have a value if boiler activate entity is set
 - removed the requirement off stages from heating when adjustement is on/off
 - when boiler_present = false or heating_present= false all the other settings are optional
@@ -214,15 +283,15 @@ This release is the first step in that direction.
 The first step is that all our current settings are compared and validates with a model that is build of all possible settings.
 Until now this model is only tested by @simnet and myself.<br>
 @simnet is the great force and hard worker behind all these changes, all credits to him!
-So we ask the testers before you install this update: 
+So we ask the testers before you install this update:
 1. make a backup of your "old" app (what in the old times was named "add-on")
 2. make a backup/copy of your settings (options.json) if you forget that: DAO also makes a copy of your options.jon: options_unversioned.json<br>
 
 Watch at the logging of the new app and if you find any "irregularities" tell us via tweakers or Github.
 After installation there are a few new files in the app which are possibly interesting to read:
-- DEVELOPER_GUIDE.md (in dao/prof/config) for developersand collaborators who want make new settings. 
+- DEVELOPER_GUIDE.md (in dao/prof/config) for developersand collaborators who want make new settings.
 - config_schema.json to validate the configurations
-- SETTINGS.md a completely automatic generated summary of all possible settings 
+- SETTINGS.md a completely automatic generated summary of all possible settings
 
 One thing what also changed in this test-release:
 The mip-library is updated to a new version; now we don't need the self-compiled binaries
@@ -241,7 +310,7 @@ Fixed python pad
 # 2026.03.0.rc5
 ### New feature:
 - Add Fast Forward and Fast Reverse to web interface Home page (PR from @tomvandepoel3)
-- Improve error handling. Got "could not convert string to float: unavailable" exception without a reference to the problem HA entity. 
+- Improve error handling. Got "could not convert string to float: unavailable" exception without a reference to the problem HA entity.
 This change should help locate and fix such issues.
 - All used data of the ml-training are output in debug-level of logging (take care much data!!)
 
@@ -260,7 +329,7 @@ Changed entity hp heat demand from input_boolean (values "on"/"off" to input_sel
 ### Fixes
 - Fixed error "reduce hours" with interval "1hour" (pr by @bramgradussen)
 - Fixed error missing inverter values at the begin/end of period (@reported by @DaBit)
-- Fixed error when reducing power during charging at high soc and during discharging 
+- Fixed error when reducing power during charging at high soc and during discharging
 at low soc, taken the mean value of the soc at the start and the soc at the end of the interval (reported by @bartzzz)
 
 
@@ -371,25 +440,25 @@ Fix start error web_menu
 ### Implementation ml prediction solar production
 
 This is a first implementation of a ML prediction of solar-production.
-The predictions are a first attempt but at the moment the accurancy is less or 
+The predictions are a first attempt but at the moment the accurancy is less or
 equal than the old predictions of DAO.
 
 This product is a co-project of @simnet and @corneel27/kc27.
 
 We will be glad if users of DAO wil test this feature, but be careull.
-When you install this Release Candidate your DAO database will be changed 
+When you install this Release Candidate your DAO database will be changed
 and will not be useable anymore with versions of DAO prior 2025.12.2.
 
-Our advice: make a copy of your "old" DAO-database (with sqlite this is easy) and 
+Our advice: make a copy of your "old" DAO-database (with sqlite this is easy) and
 make this accessable for the new rc; so the production version of DAO (2025.12.1) can go on.
 For users with mysql or postgresql there are tools on internet to copy your data
-to a sqlite-database (for mysql: mysql2sqlite, for postgresql look at his post where someone has documented his move 
+to a sqlite-database (for mysql: mysql2sqlite, for postgresql look at his post where someone has documented his move
 from postgresql to sqlite: https://community.home-assistant.io/t/postgresql-to-sqlite-migration-moving-back-to-sqlite/764151)
 
 For questions: ask on tweakers.
 
 Our advice to test this rc:
-1. Let your production version do his hourly/15-min jobs 
+1. Let your production version do his hourly/15-min jobs
 2. Install this rc with the following steps:
    - stop the addon if running
    - install the rc-addon in the way you are used to
@@ -399,9 +468,9 @@ Our advice to test this rc:
    changes
    - look at add-logging for possible errors
    - zet in de scheduler `"active"="false"`, zodat de rc de productie niet in de wielen rijdt.
-   
+
 3. Make the following changes in your solar-settings:
-4. ````  
+4. ````
    "solar": [
     { "name" : "woning",
       "ml_prediction": "true",
@@ -412,7 +481,7 @@ Our advice to test this rc:
 Nadere toelichting:
 
 - name must be present and unique in all your solar-device (also the pv_dc devices)
-- ml_prediction is optional, when not present or "false" the "old" prediction of the solar production will be used 
+- ml_prediction is optional, when not present or "false" the "old" prediction of the solar production will be used
 - entities sensor: a list of one or more sensors which register the total production of this device. This information is used for training the ml-model.
 - max-power: this is maximum power (kW-peak) of the device. This information is used to detect "outliers", before training the model.
 
@@ -422,7 +491,7 @@ In the run-menu of the dashboard is an a new rule "ML-modellen trainen".
 When you activate this rule: for devices with ml_prediction = True there will be a model calculated.
 7. What happens:
    - in the dao-database meteo-data (measurements of radiation and temperature) of a nearby knmi station are retrieved and saved.
-   - the first timethere will be data saved of 365 days (this cost more time). 
+   - the first timethere will be data saved of 365 days (this cost more time).
    The next time this data will be completed (if available).
    - From HA database the production data will be retrieved
    - then a model will be calculated
@@ -501,16 +570,16 @@ Fixed issue with heatpump when no heat is required (reported by @sailor_dg)
 # 2025.12.0.rc1
 - To prevent startup-error in DAO-container: deleted "set_last_activity" from init scheduler
 - Fixed error minimal_run_length with on/off adjustment heatpump
-- Fixed potential index-error boiler-module 
+- Fixed potential index-error boiler-module
 - Prevent scheduling extra consumption boiler after heating boiler
- 
+
 # 2025.11.2.rc4
 Fix boiler calculation: take heat content into account
 
 # 2025.11.2.rc3
 - Fix several boiler errors
 - Fix heatpump errors
-- Debian base 9.1.0 
+- Debian base 9.1.0
 
 # 2025.11.2.rc2
 Fix notification error
@@ -532,11 +601,11 @@ Changes in "heatpump":
 - maximization of the total heat to produce to prevent "no solution"
 - extra logging heatpump
 
-# 2025.11.1.rc3 
+# 2025.11.1.rc3
 
 - Fixed error with heatpump and heatpump-boiler with on/off adjustment
 - Fixed error with on/off adjustement and not configured power-entity
-- Fixed apparmor.txt for network-access 
+- Fixed apparmor.txt for network-access
 
 # 2025.11.1.rc2
 Fixed calc error
@@ -608,7 +677,7 @@ geen wijzigingen t.o.v. versie 2025.10.4.rc6
 - Several python-modules are updated
 
 # 2025.10.4.rc5
-- Added environment variabels to .bashrc 
+- Added environment variabels to .bashrc
 - Update releasetesting build.yaml to 8.1.3
 
 # 2025.10.4.rc4
@@ -717,13 +786,13 @@ If you don't want trouble: make nordpool your price-source.
 
 **boiler**<br>
 The boiler part is completely redesigned and (in my opinion) become better.
-The (thermal and financial) value of the boiler at the beginning and the end of the calculationperiod si taken into account. 
+The (thermal and financial) value of the boiler at the beginning and the end of the calculationperiod si taken into account.
 For every interval the electricity consumption for reheating is calculated and thee best fitting will be choosen in the algortime.
 
 **test**<br>
 If you want to test with 15min-interval, these are the steps to take:
 - don't use your test-addon as production-addon, there can be errors: I hope you find and report them
-- choose a seperate da-database for the test-addon (sqlite will do perfect) 
+- choose a seperate da-database for the test-addon (sqlite will do perfect)
 - deactivate (=delete) the row(s) in your scheduler-settings that calculate every hour
 - set your interval to "15min"
 - get the meteo
@@ -738,9 +807,9 @@ If you want to test with 15min-interval, these are the steps to take:
 **Know issues**
 - the consumption with 15min interval is higher than with 1hour interval
 - also other results are different for interval=1hour and interval=15min. Who can help me to figure this out?
-- the prognoses-parts of the reports are wrong 
+- the prognoses-parts of the reports are wrong
 
-It is my objective to bring a production release before September 20th (I will be absent for about a week).  
+It is my objective to bring a production release before September 20th (I will be absent for about a week).
 
 # 2025.9.0.rc1
 Fix error api prognose pv_dc
@@ -750,7 +819,7 @@ Zelfde als productie versie 20258.8.1
 - small corrections in DOCS.md
 
 # 2025.8.1.rc4
-- You can configure the meteo-model for your data (option, default **harmonie**) 
+- You can configure the meteo-model for your data (option, default **harmonie**)
 - You can configure the max number of attempts (option, default 2)<br>
 
 More info in DOCS.md
@@ -769,7 +838,7 @@ Fixed index-error when more than one batteries are used (reported by @PSMGoossen
 - Retry once if no meteodata recieved
 
 # 2025.8.0.rc2
-- Clear error message when no data present from Nordpool 
+- Clear error message when no data present from Nordpool
 - Supplement documentation instant start
 
 # 2025.8.0.rc1
@@ -786,7 +855,7 @@ Fixed name-error
 
 # 2025.7.4.rc1
 - Only draw consumption/production of configured devices.
-- Implemented instant charging electric vehicle(s) (see DOCS.md) 
+- Implemented instant charging electric vehicle(s) (see DOCS.md)
 
 # 2025.7.3.rc2
 - Changed calculation of baseloads to omit NaN
@@ -812,7 +881,7 @@ With backward compatibility!
 
 # 2025.7.0
 
-# BREAKING CHANGE<br>support stops for i386 
+# BREAKING CHANGE<br>support stops for i386
 Machines with i386-processor will not be supported anymore.<br>
 Some necessary modules (o.a. cryptography) are not available for the i386 architecture.<br>
 There are a few users with this processor (5 of ca 200).
@@ -870,7 +939,7 @@ These are the new settings with the new names:
       "2024-04-01": 0.0175,
       "2024-08-01": 0.020496
     },
-    
+
 ````
    The **cost supplier** values above are for Tibber so please adjust if you have another supplier.
 
@@ -888,7 +957,7 @@ The "prices production" are only relevant if they differ from "prices consumptio
 When you set both "True" and the values are equal, they will be plotted over each other.
 
 5. The VAT (BTW) is now divided in two categories "vat consumption" and "vat production" and so are the settings:
-This is done for the Belgian users of DAO wich have a different vat for redelivery but also for the future when tax refund and possible also vat refund 
+This is done for the Belgian users of DAO wich have a different vat for redelivery but also for the future when tax refund and possible also vat refund
 will stop.<br>
 To keep it backwards compatible the following logic is implemented:
    - when "vat consumption" is not found: "vat" will be used
@@ -912,7 +981,7 @@ To keep it backwards compatible the following logic is implemented:
 6. The term **ip adress** in the settings for connecting your Home Assistant machine is deprecated.
 Use the generic term **host** for it in the future (feature request of ebbz)
 
-## New features 
+## New features
 - Introduction of a new optional setting for your solar strings (ac and dc):
   **max power**. With this setting (in kW) you can cap the power of your pv-string with the max power of your inverter(s) (feature request)
 - Extend the result of the api-call for pv_ac and pv_dc (the last one is new) when invoked with the period "vandaag_en_morgen".
@@ -947,7 +1016,7 @@ Therefor the period of getting meteo-data is enlarged until 96 hour from "now" (
 - Fixed error with postgresql during reporting of savings (reported by @balk77)
 - Fixed planning error when calculating the planning of a machine during the planning window (reported by @bvw)
 
-# [V2025.4.0] 
+# [V2025.4.0]
 
 ### BREAKING CHANGE
 - Fixed the error (two hours too late) in the timestamp in the result-records from api/report-calls<br>
@@ -980,7 +1049,7 @@ The records now have a different structure:
     .....
   ```
   - for instance the data-structure for a consumption request:
-  ``` 
+  ```
   {"message": "Success",
   "data": [
     {
@@ -1005,18 +1074,18 @@ The records now have a different structure:
 - Fixed warning when getting prices from Nordpool for a day with changing to/from daylight saving <br>
 - Fixed warning when calculating optimization for a day with changing to/from daylight saving
 
-# [V2025.3.1] 
+# [V2025.3.1]
 - Fixed error: no version-info when rendering api_run.html
 - Fixed error when using sqlite for Home Assistant database during generating reports
 - Fixed time error, when calling api-report over long periodes
 
-# [V2025.3.0] 
+# [V2025.3.0]
 - Fixed error when one use postgresql and get prices from Nordpool
 - Fixed error when no co2-sensor is configured in the settings
 - Introduction of new reports of **Savings** when you use one or more home baterries:
   - consumption (most of the time this saving wil be negative, because the use of the battery cost energy)
   - cost
-  - CO2-emission; only available when you have activated the integration **Electricity Maps** 
+  - CO2-emission; only available when you have activated the integration **Electricity Maps**
   and when you have configured the sensor CO2-intensity in your settings
 - All reports of CO2-emissions are restricted till the current hour, because the sensor CO2-intensity
 only have values till the current hour. You cannot use the checbox "met prognose" and also the periods "morgen"
@@ -1028,42 +1097,42 @@ For instance:
  ![saving_cost_graph.png](images/saving_cost_graph.png) <br />
 
 
-# [V2025.2.0] 
+# [V2025.2.0]
 - Fixed error calculating historic consumption and production since last invoice day
 - Fixed error calculating baseload and balance with no/zero values sensor growatt inverter
 - Better log and notification of errors, warnings and exceptions, also when you use a notification entity
 - Correct a few typos in DOCS.md (o.a. homeassistant_v2.db -> home-assistant_v2.db)
 - Time correction of one hour in meteo-data is removed
 
-# [V2025.1.3] 
+# [V2025.1.3]
 - Fixed "no optimal solution" when no zero-power stage is configured with a battery
 - Implemented calculation and report of CO2-emission (see [DOCS.md](https://github.com/corneel27/day-ahead/blob/main/dao/DOCS.md#co2-emissie))
 - Fixed year with copyright/license
 
-# [V2025.1.2] 
+# [V2025.1.2]
 - Fixed errors when postgresql db-engine is used
 - Fixed error calculating report/balance with period "vorige maand"
 
-# [V2025.1.1] 
+# [V2025.1.1]
 Fixed errors when consumption-data in last contractyear could not be calculated.
 
-# [V2025.1.0] 
+# [V2025.1.0]
 - Fixed error saving prognoses with postgresql database
 - Fixed error getting history consumption data: also data in ha-db are taken in account
 - Optimum low level for the battery is back again
 - When choosen for strategy "minimize consumption", there was sometimes "no solution",
 this is corrected
 
-# [V2024.12.3] 
+# [V2024.12.3]
 Fixed error getting battery limits when no battery is configured
 
-# [V2024.12.2] 
+# [V2024.12.2]
 Fixed typo in utils.py
 
-# [V2024.12.1] 
+# [V2024.12.1]
 Fixed error: cycle costs (last) battery were not taken into account
 
-# [V2024.12.0] 
+# [V2024.12.0]
 # LET OP
 De energiebelasting wijzigt per 1 januari 2025.<br>
 Neem deze over van onderstaande lijst in je instellingen:<br>
@@ -1083,12 +1152,12 @@ Neem deze over van onderstaande lijst in je instellingen:<br>
 ```
 # Breaking change
 There is an extra optional parameter when calling an api-report: **expected**.<br>
-When you call the api without `expected` or `expected=0` (default value) then only **recorded** values 
+When you call the api without `expected` or `expected=0` (default value) then only **recorded** values
 are reported and the expected part of the json-result will be empty.
-When you call with the parameter `expected=1` then the expected values are reported in the expected 
+When you call with the parameter `expected=1` then the expected values are reported in the expected
 part of the json-result.<br>
 For periods with the interval "hour", there will be no change.
-But for periodes with the interval "day" or "month" this can lead to new results. 
+But for periodes with the interval "day" or "month" this can lead to new results.
 For instance when you call the api for period "deze_week", without the parameter "expected" you get this result:<br>
 ```{ "message":"Success", "recorded": [{"time":"2024-12-02 00:00","value":36.7450000558},{"time":"2024-12-03 00:00","value":19.1840000708},{"time":"2024-12-04 00:00","value":36.8009995644},{"time":"2024-12-05 00:00","value":19.7590002147},{"time":"2024-12-06 00:00","value":43.3299993972},{"time":"2024-12-07 00:00","value":24.9570001736},{"time":"2024-12-08 00:00","value":6.462}], "expected" : [] }```<br>
 But when you call it with "expected=1" then you get:<br>
@@ -1103,8 +1172,8 @@ didn't give enough good results
 - There is an error reported in a api-call: `http://<ip-adres>:5000/api/report/cost/deze_maand`. <br>This error is fixed?
 - Fixed error api call "netto_cost"
 - Scheduling of boiler can be postponed via a ha-entity
-- when boiler is heated bij the heat pump for room-heating then there can only be "one" heating 
-function in an hour, therefore is a new setting introduced in the boiler-section: "boiler heated 
+- when boiler is heated bij the heat pump for room-heating then there can only be "one" heating
+function in an hour, therefore is a new setting introduced in the boiler-section: "boiler heated
 by heatpump". This setting can be "True" or "False"
 - the code is brought inline with PEP 8 (Style Guide for Python Code)
 - Scheduling of heatpump can be set via a ha-entity
@@ -1112,11 +1181,11 @@ by heatpump". This setting can be "True" or "False"
   - on/off
   - heat curve adjustment
   - calculated power
-- When setting a state of an entity failed then an error message is written in the log 
+- When setting a state of an entity failed then an error message is written in the log
   (name of the entity, new failed value)
 
 ## [V2024.11.1]
-- Fixed an error when getting Tibber-data when using a Tibber pulse: 
+- Fixed an error when getting Tibber-data when using a Tibber pulse:
 only data before today are stored
 
 ## [V2024.11.0]
@@ -1127,17 +1196,17 @@ only data before today are stored
 
 ## [V2024.10.5]
 - Correct error change to winter-time
-  
+
 ## [V2024.10.4]
 - When there are no batteries configured there was a soc-calculation error. This is corrected.
 - The color of all the soc-lines are changed to "olive"
 
 ## [V2024.10.3]
 - There is an extra optionalgraph (for each battery one) which shows the energybalance of the battery(ies).
-You can omit this graph with a setting in the "graphics"-section": <br> 
+You can omit this graph with a setting in the "graphics"-section": <br>
 `"battery balance": "False",`
 - There was in the dasboard during an optimum calculation sometimes an **internal server error** caused by a too low timeout (30 sec).
-The new timeout is raised to 60 sec. 
+The new timeout is raised to 60 sec.
 - When Nordpool data were not present there was a json-error message. This is corrected: there is now a not present message.
 - The Nordpool source didn't work anymore. The module with the api library for Nordpool is updated.
 
@@ -1145,19 +1214,19 @@ The new timeout is raised to 60 sec.
 ## [V2024.10.2]
 - New version of entsoe-py module fixed entsoe-issue
 - New optional feature is introduced: "reduced hours". With this feature you can limit the max power
-(charge and discharge) of your inverter/battery. You can use this to prevent too much noise. (zie DOCS.md)  
+(charge and discharge) of your inverter/battery. You can use this to prevent too much noise. (zie DOCS.md)
 - There was a malformed string in an error-message, this is corrected
 A new installation with sqlite had a failure, this is corrected.
 - There were configuration errors for the sqlite-dialect. These generated errors during reporting.
 These are repaired.
-- The watchdog restarted the scheduler too often. Now it only restarts the scheduler after a change 
+- The watchdog restarted the scheduler too often. Now it only restarts the scheduler after a change
 of "options.json" or "secrets.json".
 
 ## [V2024.10.1]
 - There was an error in reporting with sqlite-db, this is corrected
 
 ## Belangrijk
-De eerder opgenomen tijden in `options.json` voor het ophalen van meteodata via de scheduler geven regelmatig verkeerde data aan de kant van Meteoserver (in de tijd verschoven). 
+De eerder opgenomen tijden in `options.json` voor het ophalen van meteodata via de scheduler geven regelmatig verkeerde data aan de kant van Meteoserver (in de tijd verschoven).
 Je kunt ze beter vervangen door onderstaande tijden:
 ```
     "0430": "get_meteo_data",
@@ -1168,13 +1237,13 @@ Je kunt ze beter vervangen door onderstaande tijden:
 ## [V2024.10.0]
 - There was an error during saving the calculated soc of more than one battery. This is fixed.
 - A better report when there is a json-format error in the settings or secrets file
-- The calculated use of a formerly planned engine is beter calculated and taken in account in the 
+- The calculated use of a formerly planned engine is beter calculated and taken in account in the
 total consumption and cost
 - There was an error in calculating start=time of engine(s), this is corrected.
 - The calculated use of a formerly planned engine is now correct reported
 
 ## [V2024.8.7]
-- The calculated bat-in was not saved; as a consequence the balance report was wrong or not presented 
+- The calculated bat-in was not saved; as a consequence the balance report was wrong or not presented
 (error). This corrected.
 - Changed pythonmodule postgresql (psycopg2-binary -> psycopg2)
 
@@ -1193,8 +1262,8 @@ total consumption and cost
 
 
 ## [V2024.8.4]
-- the extended logging of saving prognoses (prices, meteo-data and calculated consumptions) is moved from info to debug  
-- there were issues with "lost connections" in combination with the mysql/mariadb db-engine; 
+- the extended logging of saving prognoses (prices, meteo-data and calculated consumptions) is moved from info to debug
+- there were issues with "lost connections" in combination with the mysql/mariadb db-engine;
 with extra parameters during the engine-initialisation these issues are solved.
 
 
@@ -1227,11 +1296,11 @@ The following engines are possible:
    - mariadb/mysql
    - progresql
    - sqlite3 <br>
- 
-    To make it easy for the current users: "mysql/mariadb" is the default engine. 
-    So there is for them no need to change something in the settings. 
+
+    To make it easy for the current users: "mysql/mariadb" is the default engine.
+    So there is for them no need to change something in the settings.
     Further info in DOCS.md<br><br>
-   
+
  - There are 4 extra possible (=optional) entities which you can use to manage and operate your battery(ies):
    - entity from battery: how much energy is going from the battery to the dc-bar (W)
    - entity from pv: how much energy is going from the dc-solar system to the dc-bar (W)
@@ -1256,21 +1325,21 @@ This error is solved.
 
 ## [V2024.5.5]
 There is a fourth source added to get day-ahead prices: tibber.
-In cases as on June 25th when nordpool and entsoe have don't have epex prices you can get them from Tibber. 
+In cases as on June 25th when nordpool and entsoe have don't have epex prices you can get them from Tibber.
 
 ## [V2024.5.4]
-- If there are not enough meteo from Meteoserver from the fineley meshed model (Harmonie), 
+- If there are not enough meteo from Meteoserver from the fineley meshed model (Harmonie),
 then the missing data are retrieved from the coarse model (GFS).<br>
 Conclusion:the optimization calculation will now always calculate as far as the day-ahead prices are known.
 - The meteo log file was name "tibber_...", this is corrected, and now they are named "meteo_..."
 - In the dashboard at the menu-option **Home** and the suboption **tabel** now all loggings (not only calc, but also meteo, prices etc.)
-are showed. To begin with the most recent one. 
+are showed. To begin with the most recent one.
 - Meteograph is now showed in the style as defined in the graph-settings
- 
+
 
 ## Breaking change
 The filenames of the loggings and the images are again (sorry) changed. After installtion of the new version
-are the old files not visible anymore in the dashboard. But you can see them with your favorite file-explorer in combination with the Samba add-on. 
+are the old files not visible anymore in the dashboard. But you can see them with your favorite file-explorer in combination with the Samba add-on.
 ## [V2024.5.6]
 - When there is "no battery" configured in the settings the program produced a "list indexout of range".
 This error is solved.
@@ -1279,30 +1348,30 @@ This error is solved.
 
 ## [V2024.5.5]
 There is a fourth source added to get day-ahead prices: **tibber**.<br>
-In cases as on June 25th when Nordpool and Entsoe don't have epex prices you can get them from Tibber. 
+In cases as on June 25th when Nordpool and Entsoe don't have epex prices you can get them from Tibber.
 
 ## [V2024.5.4]
-- If there are not enough meteo from Meteoserver from the fineley meshed model (Harmonie), 
+- If there are not enough meteo from Meteoserver from the fineley meshed model (Harmonie),
 then the missing data are retrieved from the coarse model (GFS).<br>
 Conclusion:the optimization calculation will now always calculate as far as the day-ahead prices are known.
 - The meteo log file was name "tibber_...", this is corrected, and now they are named "meteo_..."
 - In the dashboard at the menu-option **Home** and the suboption **tabel** now all loggings (not only calc, but also meteo, prices etc.)
-are showed. To begin with the most recent one. 
+are showed. To begin with the most recent one.
 - Meteograph is now showed in the style as defined in the graph-settings
- 
+
 
 ## Breaking change
 The filenames of the loggings and the images are again (sorry) changed. After installtion of the new version
-are the old files not visible anymore in the dashboard. But you can see them with your favorite file-explorer in combination with the Samba add-on. 
+are the old files not visible anymore in the dashboard. But you can see them with your favorite file-explorer in combination with the Samba add-on.
 
 ## [V2024.5.3]
 - Fixed the calculation stop when prognose arrays are not equal. Further tests are necessay!!
-- The use of the `"entity pv switch"` in solar installations (pv_ac as well as pv_dc) is now optional. 
-When entity is not mentioned in the settings in one or more of your pv-installations, that pv-installation(s) will never be turned off. 
+- The use of the `"entity pv switch"` in solar installations (pv_ac as well as pv_dc) is now optional.
+When entity is not mentioned in the settings in one or more of your pv-installations, that pv-installation(s) will never be turned off.
 - When the program encounters a warning or an error a message is placed in the `notification entity`.
 When you have installed the Home Assistant app you can get a notification with that message on your smartphone (zie DOCS.md)
 - The filenames of the loggings and the images are again (sorry) changed. After installtion of the new version
-are the old files not visible anymore in the dashboard. But you can see them with your favorite file-explorer in combination with the Samba add-on. 
+are the old files not visible anymore in the dashboard. But you can see them with your favorite file-explorer in combination with the Samba add-on.
 
 
 ## [V2024.5.2]
@@ -1335,7 +1404,7 @@ Een soms optredende fout bij het sommeren van de accutabel zorgde voor het niet 
 Het sommeren is (tijdelijk) eruit gehaald.
 
 ## [V2024.3.7]
-- De installatieprocedure is verkort door over te stappen van pip naar uv als tool voor het installeren van Python modules 
+- De installatieprocedure is verkort door over te stappen van pip naar uv als tool voor het installeren van Python modules
 - In het laatste uur van het laden van een elektrische auto wordt geen eindtijd doorgegeven aan de entiteit **entity stop charging**
 - Format specifier opgenomen voor het invoeren datums bij het ophalen van prijzen.
 - DAO is uitgebreid met optionele functionaliteit voor het inplannen van diverse huishuidelijke machines en apparaten (zie DOCS.md)
@@ -1344,7 +1413,7 @@ Het sommeren is (tijdelijk) eruit gehaald.
 Er is een optionele aanvulling te gebruiken bij het inplannen van het laden van een elektrische auto.
 Soms komt het voor het beter is om in een uur maar een deel van dat uur met een beter rendement (en een hoger vermogen)
 de auto te laden.
-Je kunt nu bij je instellingen een entiteit opgeven (entity stop charging) waarin het programma het eindstip van het 
+Je kunt nu bij je instellingen een entiteit opgeven (entity stop charging) waarin het programma het eindstip van het
 berekende eindstip opslaat van de oplaadactie in het betreffende (alleen als er niet een heel uur hoeft te worden geladen).
 Je zult daar dan zelf in HA een automatisering voor moeten maken die wordt getriggerd op het betreffende tijdstip.
 Zie voor informatie en een voorbeeld DOCS.md
@@ -1360,14 +1429,14 @@ Is hiermee hersteld.
 
 ## [V2024.3.3]
 Voor de gebruikers die op 3,4 en/of 5 april 2024 geen day ahead prijzen binnen hebben gekregen is in deze versie een kleine
-uitbreiding aangebracht in het Run-menu van de webserver. Daarmee kun je nu een vanaf- en tot-datum invullen bij het 
+uitbreiding aangebracht in het Run-menu van de webserver. Daarmee kun je nu een vanaf- en tot-datum invullen bij het
 ophalen van de prijsinformatie. Dat werkt bij alle drie de providers (nordpool, entsoe en easyenergy), maar bij nordpool
 kun je steeds maar een dag tegelijk ophalen en dat doet hij dan op de ingevulde vanaf-datum.
 Meer info in DOCS.md
 
 ## [V2024.3.2]
-Met de versie 2024.4.0 van Home Asssistant is een nieuw attribuut geintroduceerd (last_reported).  
-De nieuwe versie (0.2.1) van module hassapi gaat hier goed mee om, 
+Met de versie 2024.4.0 van Home Asssistant is een nieuw attribuut geintroduceerd (last_reported).
+De nieuwe versie (0.2.1) van module hassapi gaat hier goed mee om,
 de oude versies genereerde foutmeldingen.
 Deze versie installeert de nieuwe versie van deze module.
 
@@ -1380,17 +1449,17 @@ Vanaf deze versie kun je de te gebruiken baseload(s) in de berekening door het s
 Zie DOCS.md
 
 ## [V2024.2.8]
-Er zat een fout in de opgehaalde meteogegevens. In tegenstelling tot de documentatie van 
+Er zat een fout in de opgehaalde meteogegevens. In tegenstelling tot de documentatie van
 Meteoserver waren de tijdstippen een uur verschoven. Dit is gecorrigeerd.
 
 ## [V2024.2.7]
 Er is een extra instelling geintroduceerd voor het inplannen van het opladen van een auto.
-De *level margin* (default 0) zorgt desgewenst voor een extra marge voordat opladen wordt ingeplan 
+De *level margin* (default 0) zorgt desgewenst voor een extra marge voordat opladen wordt ingeplan
 (zie voor meer uitleg DOCS.md)
 
 Heel soms startte een ingeplande berekening een seconde voor het hele uur.
 Dat gaf dan veel ongewenste resultaten
-Als nu een ingeplande berekening minder dan 10 seconden voor het hele uur start wordt deze 
+Als nu een ingeplande berekening minder dan 10 seconden voor het hele uur start wordt deze
 berekend alsof deze op het hele uur is gestart.
 
 ## [V2024.2.6]
@@ -1414,18 +1483,18 @@ Enkele opmaakfoutjes zijn hersteld
 In deze versie zijn veel zaken toegevoegd en gewijzigd:
 - We stappen over op eenzelfde soort **versienummering** als Home Assistant: jaar, maand en opvolgende nummering binnen die maand.
 - Voor de rapportages is het niet meer verplicht om de data op te halen bij **Tibber**.
-Je kunt dus ook klant zijn bij een andere leverancier (bijv. ANWB). Je haalt dus alle aanroepen voor het ophalen 
+Je kunt dus ook klant zijn bij een andere leverancier (bijv. ANWB). Je haalt dus alle aanroepen voor het ophalen
 van data bij Tibber (`get_tibber_data`) uit de scheduler. In dat geval kan ook het invullen van de url en het token
 bij Tibber in de instellingen achterwege blijven. <br>
-Om toch goede rapportages te kunnen maken is het dan wel noodzakelijk dat je je verbruiksgegevens van de slimme 
-meter bijhoudt in Home Assistant (via de instellingen van het Energiedashboard van HA) en de entiteiten waarmee je deze 
+Om toch goede rapportages te kunnen maken is het dan wel noodzakelijk dat je je verbruiksgegevens van de slimme
+meter bijhoudt in Home Assistant (via de instellingen van het Energiedashboard van HA) en de entiteiten waarmee je deze
 bijhoudt moet je opgeven bij de sectie **report** van de instellingen (zie ook DOCS.md).
 - Voor het **opladen van je elektrische auto('s)** kun je nu een lijst met amperages opgeven (eventueel aangevuld met efficiency)
 waaruit het programma de voor jouw gunstigste amperages kiest gegeven de prijs van elektriciteit, de capaciteit van je aansluiting
 en het tijdstip waarop de auto het jouw gewenste laadniveau moet hebben (zie ook DOCS.md).<br>
 **breaking change** Naast de instellingen voor de verschillende laadniveaus moet je nu ook een entiteit ("entity set charging ampere", input_number) opgeven,
 waarin het programma de gewenste hoeveelheid ampere kan doorgeven waarmee in het lopende uur geladen moet worden.<br>
-- Het invoeren je **baseload** bij je instellingen kan vervallen als het programma jouw baseload kan berekenen uit opgeslagen 
+- Het invoeren je **baseload** bij je instellingen kan vervallen als het programma jouw baseload kan berekenen uit opgeslagen
   verbruiken over een voldoende lange periode. <br>
   Daarvoor moet je over minimaal twee maanden de volgende gegevens bijhouden in Home Assistant (via de instellingen van het energiedashboard):
     - de verbruiksgegevens van de slimme meter
@@ -1434,15 +1503,15 @@ waarin het programma de gewenste hoeveelheid ampere kan doorgeven waarmee in het
     - indien van toepassing het verbruik van je wp
     - indien van toepassing het verbruik van je boiler
     - de productie van je zonnepanelen<br>
-  
-    Bij de instellingen (zie DOCS.md) geef je dan op dat de baseload moet worden berekend en 
+
+    Bij de instellingen (zie DOCS.md) geef je dan op dat de baseload moet worden berekend en
   hoeveel dagen terug daarvoor moet worden gerekend. <br>
- **Bonus**: de baseload wordt per weekdag berekend. Met name in het weekend wijkt de baseload af van het 
+ **Bonus**: de baseload wordt per weekdag berekend. Met name in het weekend wijkt de baseload af van het
 weekgemiddelde en de verwachting is dat dit de nauwkeurigheid van de voorspellingen ten goede komt.
-- Bij een flink aantal instellingen zijn "**default**" (standaard) instellingen geintroduceerd. Dat betekent dat 
+- Bij een flink aantal instellingen zijn "**default**" (standaard) instellingen geintroduceerd. Dat betekent dat
 je deze instellingen kunt weglaten in het instellingenbestand als de standaard instelling voor jou voldoet.
 Belangrijkste instelling die weggelaten kan worden als je het programma als addon op je HomeAssistant-machine
-installeert zijn de instellingen voor de communicatiemet Home Assistant. Dit regelt dan de Home Assistant 
+installeert zijn de instellingen voor de communicatiemet Home Assistant. Dit regelt dan de Home Assistant
 supervisor voor je. In DOC.md is een tabel opgenomen van alle instellingen inclusief de default-instelling (voor zover van toepassing)
 - De rapportage functie is uitgebreid met een rapportage van je **energiebalans**:
 ![img_11.png](images/img_11.png)
@@ -1452,9 +1521,9 @@ van diverse meters en verbruikers moeten bijhouden(zie voor verdere uitleg DOCS.
 - Na een berekening is kreeg je al een hele uitdraai van allerlei berekeningen.
 Met name de tabel met de in- en uitgaande energie en de efficiency van je thuisbatterij(en) riep hier en daar wat vragen op.
 Deze tabel is nu aangepast (de berekeningen zijn hetzelfde):
-```   
+```
    In- en uitgaande energie per uur batterij: Accu1
-   
+
    uur   ac->    eff   ->dc pv->dc   dc->    eff  ->bat  o_eff    SoC
           kWh      %    kWh    kWh    kWh      %    kWh      %      %
     15   0.00     --   0.00   0.00   0.00     --   0.00     --  43.50
@@ -1466,11 +1535,11 @@ Deze tabel is nu aangepast (de berekeningen zijn hetzelfde):
     21   0.00     --   0.00   0.00   0.00     --   0.00     --  18.00
     22   0.00     --   0.00   0.00   0.00     --   0.00     --  18.00
     23   0.00     --   0.00   0.00   0.00     --   0.00     --  18.00
-Totaal  -7.06     --  -7.50   0.00  -7.50     --  -7.65     --       
+Totaal  -7.06     --  -7.50   0.00  -7.50     --  -7.65     --
 ```
 ## [Unreleased]
 De volgende zaken staan nog op de todo lijst:
-- Alle uitvoer omzetten naar logger 
+- Alle uitvoer omzetten naar logger
 - dashboard afmaken
 
 ## [V0.4.73]
@@ -1479,17 +1548,17 @@ In deze versie zijn de volgende zaken gewijzigd:
 - op een aantal punten is de documentatie verhelderd
 - optioneel: <br>
   - het basisverbruik (baseload) kan berekend worden uit de geschiedenis (zie DOCS.md)
-  - voor het goed kunnen berekenen van de baseload dient een lijst met sensoren ingevuld te worden 
-    het verbruik/productie van inkoop, maar ook van de batterij(en) en 
+  - voor het goed kunnen berekenen van de baseload dient een lijst met sensoren ingevuld te worden
+    het verbruik/productie van inkoop, maar ook van de batterij(en) en
     de stuurbare verbruikers/producenten registreren.
 
 ## [V0.4.72]
 - apparmor is geimplementeerd
-- er is icon toegevoegd voor de zijbalk 
+- er is icon toegevoegd voor de zijbalk
 
 ## [V0.4.70]
 - apparmor is (gedeeltelijk) geactiveerd
-- het creeeren van de tables en de benodigde inhoud in de database wordt 
+- het creeeren van de tables en de benodigde inhoud in de database wordt
 na installatie of update van de addon door de software uitgevoerd
 
 ## [V0.4.61]
@@ -1540,13 +1609,13 @@ Dat kan nu via een rest-command: `/api/run`
 ## [v0.3.1] - 2023-09-12
 
 ### Added
-- je kunt nu de grafische stijl definieren o.a. darkmode. (zie DOCS.md, graphics) 
+- je kunt nu de grafische stijl definieren o.a. darkmode. (zie DOCS.md, graphics)
 - je kunt het presenteren van de grafieken na het uitvoeren van een berekening aan/uit zetten. (zie DOCS.md, graphics)
 - de volgende aanvullende python modules moeten worden geinstalleerd:
 ````
   pip3 install gunicorn ephem
 ````
-- het protocol voor de api en de ws richting Home Assistant is instelbaar (zie in DOCS.md, bij het onderdeel "Home Assistant") 
+- het protocol voor de api en de ws richting Home Assistant is instelbaar (zie in DOCS.md, bij het onderdeel "Home Assistant")
 - voor de ondersteuning van een API moeten berekende resultaten worden opgeslagen.
 Daarvoor moeten de volgende variabelen worden toegevoegd aan het bestand `variabel`:
 ````
@@ -1584,28 +1653,28 @@ ENGINE=InnoDB
 AUTO_INCREMENT=1;
 ````
 - de webserver/dashboard is uitgebreid met de volgende functionaliteit:
-  * je kunt met een api-call gegevens opvragen die je o.a. kunt gebruiken in Home Assistant 
-  om sensoren te voorzien van data en attributen en waar je met de apexcharts-card 
+  * je kunt met een api-call gegevens opvragen die je o.a. kunt gebruiken in Home Assistant
+  om sensoren te voorzien van data en attributen en waar je met de apexcharts-card
   grafieken kunt maken (zie DOCS.md)
   * je kunt met een api call een berekening of bewerking uitvoeren. Deze nieuwe functionaliteit zal de
   websocket interface vervangen.
   * de "reports" zijn uitgebreid met meer perioden en bij de perioden waar ook de prognose van toepassing
   van toepassing is, kun je "prognose" aan/uit zetten (zie DOCS.md)
-  * je kunt via de web-gui alle berekeningen en bewerkingen uitvoeren en je krijgt direct 
-  de logging van het resultaat te zien (zie DOCS.md) 
+  * je kunt via de web-gui alle berekeningen en bewerkingen uitvoeren en je krijgt direct
+  de logging van het resultaat te zien (zie DOCS.md)
 
 ### Fixed
 - Het laatste uur (meestal uur 23:00) wordt nu bij de grafieken volledig getoond. Dat geldt ook voor de SoC waarde die om 24:00 uur wordt bereikt.
 - Grafieken worden niet meer getoond in de schedule-modus zodat het programma daar niet op blijft hangen
 - De pv-productie werd niet goed berekend voor panelen die niet op zuid waren georienteerd.
 Dit is aangepast.
-- Het tarief voor teruglevering zonder belasting wordt nu berekend zonder de saldering van de 
+- Het tarief voor teruglevering zonder belasting wordt nu berekend zonder de saldering van de
 inkoopvergoeding van de leverancier.
 - Bij een tussentijdse berekening (dus niet op het hele uur) werd de boiler te snel ingezet.
 Dit is hersteld.
 
 ### Changed
-- het laden van de batterij (van omvormer naar dc) wordt nu berekend met een zogenaamde "special ordered set"(sos). 
+- het laden van de batterij (van omvormer naar dc) wordt nu berekend met een zogenaamde "special ordered set"(sos).
 Dit heeft twee voordelen: <br>
   - het rekent veel sneller
   - er wordt makkelijker tussen twee "stages" geinterpoleerd. <br>
@@ -1614,7 +1683,7 @@ Dit heeft twee voordelen: <br>
 
 
 ### Issues
-Als het programma draait in scheduler-mode wordt een websocket geopend naar HA zodat vanuit HA een 
+Als het programma draait in scheduler-mode wordt een websocket geopend naar HA zodat vanuit HA een
 optimaliseringsberekening kan worden gestart.
 Als HA stopt (bijv. voor een update) dan blijft de websocket "in de lucht" maar is niet meer effectief.
 
@@ -1636,7 +1705,7 @@ Als HA stopt (bijv. voor een update) dan blijft de websocket "in de lucht" maar 
 - de staafjes van de staafgrafieken worden links aan het uurtijdstip uitgelijnd
 - de grafieklijnen van de prijzen zijn nu stapsgewijs
 - via de optie **graphics** kun je kiezen welke prijzen moeten worden getoond in de grafiek met prijzen (zie README)
-- als je een berekening laat uitvoeren met de parameter **debug** krijg je nu meer info welke instellingen zouden zijn 
+- als je een berekening laat uitvoeren met de parameter **debug** krijg je nu meer info welke instellingen zouden zijn
 aangepast als je de berekening zonder **debug** zou hebben laten uitvoeren
 - de webserver /het dasboard kan gedeeltelijk worden gebruikt (zie README)
 - een input_datetime entity die wordt geupdate als door het programma een taak wordt uitgevoerd.
@@ -1645,8 +1714,8 @@ De loggings zijn te vinden in data\log\dashboard.log.
 - versienummer in bestand _version.py
 - check op voldoende aantal rijen bij prognose data (dynamische prijzen en meteo)
     - bij 2 rijen of minder wordt er niet gerekend<br>
-    - bij 3 tot 8 rijen wordt er wel gerekend, maar wordt er wel een waarschuwing afgegeven 
-    
+    - bij 3 tot 8 rijen wordt er wel gerekend, maar wordt er wel een waarschuwing afgegeven
+
 - een changelog
 - naar keuze datum-tijd of alleen tijd input helper voor aangeven wanneer een elektrische auto geladen moet zijn
 
@@ -1658,8 +1727,8 @@ gaf het programma verkeerde resultaten voor dat eerste uur. Dit is gefixed.
 - naar keuze datum-tijd of alleen tijd input helper voor aangeven wanneer een elektrische auto geladen moet zijn
 
 ### Changed
-    
-- laden auto wordt alleen uitgezet als auto thuis is (en aangesloten) 
+
+- laden auto wordt alleen uitgezet als auto thuis is (en aangesloten)
 - ongebruikte instellingen uit DOCS.md gehaald
 - navigatieknoppen in webserver bij "home" omgezet
 - menuoptie **Meteo** in webserver voorzien van toelichting "in ontwikkeling"
@@ -1670,7 +1739,7 @@ gaf het programma verkeerde resultaten voor dat eerste uur. Dit is gefixed.
 
 
 ### Issues
-Als het programma draait in scheduler-mode wordt een websocket geopend naar HA zodat vanuit HA een 
+Als het programma draait in scheduler-mode wordt een websocket geopend naar HA zodat vanuit HA een
 optimaliseringsberekening kan worden gestart.
 Als HA stopt (bijv. voor een update) dan blijft de websocket "in de lucht" maar is niet meer effectief.
 

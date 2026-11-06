@@ -2,8 +2,9 @@
 Reporting configuration models.
 """
 
-from typing import Optional
-from pydantic import BaseModel, Field, ConfigDict
+
+from pydantic import BaseModel, ConfigDict, Field
+
 from .base import EntityId
 
 
@@ -120,9 +121,9 @@ class ReportConfig(BaseModel):
             "x-ui-widget-filter": "sensor",
         },
     )
-    co2_intensity_sensor: Optional[EntityId] = Field(
-        default=None,
-        alias="co2 intensity sensor",
+    co2_intensity_sensor: list[EntityId] | None | EntityId | None = Field(
+        default=[],
+        alias="entity co2-intensity",
         description="HA entity for CO2 intensity",
         json_schema_extra={
             "x-help": "Optional: Home Assistant sensor for grid CO2 intensity (gCO2/kWh). Used to calculate and report carbon footprint of electricity usage.",
@@ -131,7 +132,7 @@ class ReportConfig(BaseModel):
             "x-ui-widget-filter": "sensor",
         },
     )
-    sensors: Optional[dict] = Field(
+    sensors: dict | None = Field(
         default=None,
         description="Additional sensors configuration",
         json_schema_extra={
@@ -143,6 +144,7 @@ class ReportConfig(BaseModel):
     model_config = ConfigDict(
         extra="allow",
         populate_by_name=True,
+        loc_by_alias=False,
         json_schema_extra={
             "x-ui-group": "Reporting",
             "x-icon": "chart-bar",
