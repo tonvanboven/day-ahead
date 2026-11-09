@@ -25,6 +25,9 @@ class TestDashboardConfig:
         with pytest.raises(ValidationError):
             DashboardConfig(**{"ui version": "v3"})
 
+    def test_ui_version_accepts_underscore_spelling(self):
+        assert DashboardConfig(**{"ui_version": "v2"}).ui_version == "v2"
+
 
 class TestSchedulerConfig:
     def test_upstream_offset_option(self):
